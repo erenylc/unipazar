@@ -1,0 +1,21 @@
+{
+  "name": "unipazar",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "dev": "node --watch server.js",
+    "start": "node server.js",
+    "admin:grant": "node scripts/grant-admin.js",
+    "check": "node --check server.js && node --check public/app.js && node --check public/i18n.js && node --check public/i18n-extra.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "multer": "^2.0.2",
+    "nodemailer": "^10.0.10"
+  }
+}

@@ -1,0 +1,31 @@
+# Dependencies and generated files
+node_modules/
+dist/
+build/
+coverage/
+.cache/
+*.log
+
+# Credentials and environment configuration (keep the empty template)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Runtime data: accounts, sessions, messages, recordings and uploaded photos
+/data/
+/uploads/
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.db
+*.db-*
+
+# Local editor and operating system files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.tmp
+*.bak

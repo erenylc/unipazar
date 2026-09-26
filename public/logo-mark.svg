@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="UniPazar">
+  <defs><linearGradient id="g" x2="1" y2="1"><stop stop-color="#7568be"/><stop offset="1" stop-color="#363d72"/></linearGradient></defs>
+  <rect width="64" height="64" rx="18" fill="url(#g)"/>
+  <path d="M17 18v20c0 10 6 16 15 16s15-6 15-16V18" fill="none" stroke="#fff9ed" stroke-width="7" stroke-linecap="round"/>
+  <path d="M38.5 17.6c2-3.5 7.1-2.7 7.8.7.7-3.4 5.8-4.2 7.8-.7 1.8 3.1-.1 5.8-7.8 11.1-7.7-5.3-9.6-8-7.8-11.1Z" fill="#ffa888"/>
+</svg>

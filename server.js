@@ -1,0 +1,784 @@
+import express from 'express';
+import multer from 'multer';
+import nodemailer from 'nodemailer';
+import { DatabaseSync } from 'node:sqlite';
+import { randomBytes, randomInt, scrypt as scryptCallback, timingSafeEqual, createHash } from 'node:crypto';
+import { promisify } from 'node:util';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const scrypt = promisify(scryptCallback);
+const root = path.dirname(fileURLToPath(import.meta.url));
+if (fs.existsSync(path.join(root,'.env'))) process.loadEnvFile(path.join(root,'.env'));
+const dev = process.env.NODE_ENV !== 'production';
+const testEmailCodes = process.env.NODE_ENV === 'test' && process.env.TEST_EMAIL_CODES === '1';
+const port = Number(process.env.PORT || 3000);
+const universities = JSON.parse(fs.readFileSync(path.join(root, 'universities.json'), 'utf8'));
+const universityNames = new Set(universities);
+const dataDir = process.env.DATA_DIR || path.join(root, 'data');
+const uploadDir = process.env.UPLOAD_DIR || path.join(root, 'uploads');
+const messageUploadDir = path.join(dataDir, 'message-photos');
+const voiceUploadDir = path.join(dataDir, 'message-voice');
+fs.mkdirSync(dataDir, { recursive: true });
+fs.mkdirSync(uploadDir, { recursive: true });
+fs.mkdirSync(messageUploadDir, { recursive: true });
+fs.mkdirSync(voiceUploadDir, { recursive: true });
+const db = new DatabaseSync(path.join(dataDir, 'unipazar.sqlite'));
+db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;');
+const transaction = fn => {
+  db.exec('BEGIN');
+  try { const result=fn(); db.exec('COMMIT'); return result; }
+  catch(error) { db.exec('ROLLBACK'); throw error; }
+};
+db.exec(`
+CREATE TABLE IF NOT EXISTS users (
+ id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL,
+ university TEXT NOT NULL, campus TEXT NOT NULL, email_verified INTEGER NOT NULL DEFAULT 0,
+ student_status TEXT NOT NULL DEFAULT 'pending', need_status TEXT NOT NULL DEFAULT 'none',
+ need_reason TEXT, role TEXT NOT NULL DEFAULT 'student', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS verification_codes (
+ user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, code_hash TEXT NOT NULL, expires_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sessions (
+ token_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, expires_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS listings (
+ id INTEGER PRIMARY KEY, seller_id INTEGER NOT NULL REFERENCES users(id), kind TEXT NOT NULL CHECK(kind IN ('sale','donation')),
+ title TEXT NOT NULL, description TEXT NOT NULL, category TEXT NOT NULL, condition TEXT NOT NULL,
+ price INTEGER NOT NULL DEFAULT 0, university TEXT NOT NULL, campus TEXT NOT NULL,
+ status TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS listing_images (
+ id INTEGER PRIMARY KEY, listing_id INTEGER NOT NULL REFERENCES listings(id) ON DELETE CASCADE,
+ filename TEXT NOT NULL, position INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS favorites (
+ user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ listing_id INTEGER NOT NULL REFERENCES listings(id) ON DELETE CASCADE,
+ PRIMARY KEY(user_id, listing_id)
+);
+CREATE TABLE IF NOT EXISTS conversations (
+ id INTEGER PRIMARY KEY, listing_id INTEGER NOT NULL REFERENCES listings(id), buyer_id INTEGER NOT NULL REFERENCES users(id),
+ seller_id INTEGER NOT NULL REFERENCES users(id), created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ UNIQUE(listing_id,buyer_id)
+);
+CREATE TABLE IF NOT EXISTS messages (
+ id INTEGER PRIMARY KEY, conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+ sender_id INTEGER NOT NULL REFERENCES users(id), body TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS offers (
+ id INTEGER PRIMARY KEY, listing_id INTEGER NOT NULL REFERENCES listings(id), buyer_id INTEGER NOT NULL REFERENCES users(id),
+ amount INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS donation_requests (
+ id INTEGER PRIMARY KEY, listing_id INTEGER NOT NULL REFERENCES listings(id), requester_id INTEGER NOT NULL REFERENCES users(id),
+ note TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ UNIQUE(listing_id,requester_id)
+);
+CREATE TABLE IF NOT EXISTS reports (
+ id INTEGER PRIMARY KEY, reporter_id INTEGER NOT NULL REFERENCES users(id), listing_id INTEGER REFERENCES listings(id),
+ message_id INTEGER REFERENCES messages(id), reason TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open',
+ created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS admin_message_reviews (
+ id INTEGER PRIMARY KEY, admin_id INTEGER NOT NULL REFERENCES users(id),
+ conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+ reason TEXT NOT NULL, viewed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS handoffs (
+ conversation_id INTEGER PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+ place TEXT NOT NULL, meeting_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'proposed',
+ proposed_by INTEGER NOT NULL REFERENCES users(id)
+);
+CREATE TABLE IF NOT EXISTS support_applications (
+ user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+ reason TEXT NOT NULL, family_income INTEGER NOT NULL, identity_last4 TEXT NOT NULL,
+ status TEXT NOT NULL CHECK(status IN ('pending','approved','rejected')) DEFAULT 'pending',
+ submitted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, reviewed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS listings_scope ON listings(university,campus,status,created_at);
+CREATE INDEX IF NOT EXISTS messages_conversation ON messages(conversation_id,id);
+`);
+if (!db.prepare("PRAGMA table_info(users)").all().some(column => column.name === 'need_expires_at')) {
+  db.exec('ALTER TABLE users ADD COLUMN need_expires_at INTEGER');
+}
+if (!db.prepare('PRAGMA table_info(users)').all().some(column => column.name === 'needs_support')) {
+  db.exec('ALTER TABLE users ADD COLUMN needs_support INTEGER NOT NULL DEFAULT 0');
+}
+if (!db.prepare('PRAGMA table_info(users)').all().some(column => column.name === 'phone')) {
+  db.exec('ALTER TABLE users ADD COLUMN phone TEXT');
+}
+if (!db.prepare('PRAGMA table_info(users)').all().some(column => column.name === 'support_verified')) {
+  db.exec('ALTER TABLE users ADD COLUMN support_verified INTEGER NOT NULL DEFAULT 0');
+}
+if (!db.prepare('PRAGMA table_info(users)').all().some(column => column.name === 'closed_at')) {
+  db.exec('ALTER TABLE users ADD COLUMN closed_at TEXT');
+}
+db.exec("CREATE UNIQUE INDEX IF NOT EXISTS one_admin_account ON users(role) WHERE role='admin'");
+if (!db.prepare('PRAGMA table_info(messages)').all().some(column => column.name === 'read_at')) {
+  db.exec('ALTER TABLE messages ADD COLUMN read_at INTEGER');
+  db.prepare('UPDATE messages SET read_at=?').run(Date.now());
+}
+if (!db.prepare('PRAGMA table_info(messages)').all().some(column => column.name === 'photo_filename')) {
+  db.exec('ALTER TABLE messages ADD COLUMN photo_filename TEXT');
+}
+if (!db.prepare('PRAGMA table_info(messages)').all().some(column => column.name === 'voice_filename')) {
+  db.exec('ALTER TABLE messages ADD COLUMN voice_filename TEXT');
+}
+const expireListings = () => {
+  db.prepare("UPDATE listings SET status='expired' WHERE status IN ('active','reserved') AND created_at <= datetime('now','-180 days')").run();
+};
+expireListings();
+setInterval(expireListings, 60 * 60 * 1000).unref();
+
+const messageStreams = new Map();
+const notifyConversation = (conversation, senderId) => {
+  for (const userId of [conversation.buyer_id, conversation.seller_id]) {
+    for (const response of messageStreams.get(userId) || []) response.write(`data: ${JSON.stringify({ conversationId:conversation.id, senderId })}\n\n`);
+  }
+};
+
+const app = express();
+app.disable('x-powered-by');
+app.set('trust proxy', 1);
+app.use(express.json({ limit: '100kb' }));
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+    const origin = req.get('origin');
+    if (origin && origin !== `${req.protocol}://${req.get('host')}`) return res.status(403).json({ error: 'Geçersiz istek kaynağı.' });
+  }
+  next();
+});
+app.use('/api', (_req,_res,next) => { expireListings(); next(); });
+const attempts = new Map();
+function authLimit(req,res,next){
+  const key=`${req.ip}:${req.path}`, now=Date.now();
+  const entry=attempts.get(key) || {count:0,reset:now+15*60000};
+  if(now>entry.reset){entry.count=0;entry.reset=now+15*60000;}
+  entry.count++;attempts.set(key,entry);
+  if(entry.count>30) return fail(res,429,'Çok fazla deneme yapıldı. Bir süre sonra tekrar dene.');
+  next();
+}
+app.use(['/api/register','/api/login','/api/verify-email','/api/resend-code','/api/me/email','/api/me/phone','/api/me/verify-email'],authLimit);
+
+const hash = value => createHash('sha256').update(value).digest('hex');
+const clean = (value, max = 200) => String(value ?? '').trim().slice(0, max);
+const randomCode = () => String(randomInt(100000, 1000000));
+const passwordHash = async password => {
+  const salt = randomBytes(16).toString('hex');
+  const derived = await scrypt(password, salt, 64);
+  return `${salt}:${derived.toString('hex')}`;
+};
+const verifyPassword = async (password, stored) => {
+  const [salt, expected] = stored.split(':');
+  if (!salt || !expected || !/^[a-f0-9]{128}$/.test(expected)) return false;
+  const actual = await scrypt(password, salt, 64);
+  return timingSafeEqual(actual, Buffer.from(expected, 'hex'));
+};
+const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res)).catch(next);
+const fail = (res, code, error) => res.status(code).json({ error });
+const publicUser = user => user && ({ id: user.id, name: user.name, email: user.email, phone:user.phone || '', university: user.university, emailVerified: !!user.email_verified, studentStatus: user.student_status, needsSupport: !!user.support_verified, supportStatus:db.prepare('SELECT status FROM support_applications WHERE user_id=?').get(user.id)?.status || 'none', role: user.role });
+const currentUser = req => {
+  const token = /(?:^|; )up_session=([^;]+)/.exec(req.headers.cookie || '')?.[1];
+  if (!token) return null;
+  return db.prepare(`SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>? AND u.closed_at IS NULL`).get(hash(token), Date.now()) || null;
+};
+const requireUser = (req, res) => {
+  const user = currentUser(req);
+  if (!user) fail(res, 401, 'Önce giriş yapmalısın.');
+  return user;
+};
+const requireAdmin = (req, res) => {
+  const user = requireUser(req, res);
+  if (user && user.role !== 'admin') fail(res, 403, 'Bu işlem için yönetici yetkisi gerekiyor.');
+  return user?.role === 'admin' ? user : null;
+};
+const setSession = (res, userId, rememberMe = false) => {
+  const token = randomBytes(32).toString('hex');
+  const duration = rememberMe ? 30 * 86400000 : 12 * 3600000;
+  db.prepare('INSERT INTO sessions(token_hash,user_id,expires_at) VALUES(?,?,?)').run(hash(token), userId, Date.now() + duration);
+  res.cookie('up_session', token, { httpOnly: true, sameSite: 'strict', secure: !dev, ...(rememberMe ? { maxAge: duration } : {}), path: '/' });
+};
+const mailer = process.env.SMTP_HOST && process.env.SMTP_FROM ? nodemailer.createTransport({
+  host: process.env.SMTP_HOST, port: Number(process.env.SMTP_PORT || 587), secure: Number(process.env.SMTP_PORT || 587) === 465,
+  auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined
+}) : null;
+const issueCode = async user => {
+  const code = randomCode();
+  db.prepare('INSERT OR REPLACE INTO verification_codes(user_id,code_hash,expires_at) VALUES(?,?,?)').run(user.id, hash(code), Date.now() + 15 * 60000);
+  if (mailer) await mailer.sendMail({ from: process.env.SMTP_FROM, to: user.email, subject: 'UniPazar e-posta doğrulama kodu', text: `Doğrulama kodun: ${code}. Kod 15 dakika geçerlidir.` });
+  return testEmailCodes ? code : undefined;
+};
+
+app.get('/api/me', (req, res) => res.json({ user: publicUser(currentUser(req)) }));
+app.get('/api/universities', (_req, res) => res.json({ universities, emailVerificationAvailable: !!mailer || testEmailCodes }));
+app.post('/api/register', wrap(async (req, res) => {
+  const name = clean(req.body.name, 80), email = clean(req.body.email, 160).toLowerCase();
+  const university = clean(req.body.university, 100), password = String(req.body.password || '');
+  if (!name || !universityNames.has(university) || !/^\S+@\S+\.\S+$/.test(email) || password.length < 10) return fail(res, 400, 'Ad, listeden geçerli bir üniversite, e-posta ve en az 10 karakterlik şifre gerekli.');
+  if (!dev && !mailer) return fail(res, 503, 'E-posta gönderim servisi yapılandırılmadı.');
+  if (db.prepare('SELECT id FROM users WHERE email=?').get(email)) return fail(res, 409, 'Bu e-posta zaten kayıtlı.');
+  const result = db.prepare('INSERT INTO users(name,email,password_hash,university,campus,role,student_status) VALUES(?,?,?,?,?,?,?)').run(name, email, await passwordHash(password), university, '', 'student', 'pending');
+  const user = db.prepare('SELECT * FROM users WHERE id=?').get(result.lastInsertRowid);
+  if (!mailer && !testEmailCodes) {
+    setSession(res, user.id, req.body.rememberMe === true);
+    return res.status(201).json({ message: 'Hesabın açıldı.', user: publicUser(user) });
+  }
+  let devCode;
+  try { devCode = await issueCode(user); }
+  catch (error) {
+    db.prepare('DELETE FROM users WHERE id=?').run(user.id);
+    return fail(res,503,'Doğrulama e-postası gönderilemedi. Lütfen tekrar dene.');
+  }
+  res.status(201).json({ message: 'Hesap açıldı. E-postanı doğrula.', devCode });
+}));
+app.post('/api/verify-email', (req, res) => {
+  const email = clean(req.body.email, 160).toLowerCase(), code = clean(req.body.code, 10);
+  const user = db.prepare('SELECT * FROM users WHERE email=?').get(email);
+  const record = user && db.prepare('SELECT * FROM verification_codes WHERE user_id=?').get(user.id);
+  if (!user || user.closed_at || !record || record.expires_at < Date.now() || record.code_hash !== hash(code)) return fail(res, 400, 'Kod geçersiz veya süresi dolmuş.');
+  db.prepare('UPDATE users SET email_verified=1 WHERE id=?').run(user.id);
+  db.prepare('DELETE FROM verification_codes WHERE user_id=?').run(user.id);
+  setSession(res, user.id, req.body.rememberMe === true);
+  res.json({ user: publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(user.id)) });
+});
+app.post('/api/resend-code', wrap(async (req, res) => {
+  const user = db.prepare('SELECT * FROM users WHERE email=?').get(clean(req.body.email, 160).toLowerCase());
+  if (!user || user.closed_at || user.email_verified) return res.json({ message: 'Hesap varsa ve doğrulanmamışsa yeni kod gönderildi.' });
+  if (!mailer && !testEmailCodes) return fail(res,503,'E-posta gönderim servisi henüz yapılandırılmadı.');
+  let devCode;
+  try { devCode = await issueCode(user); }
+  catch { return fail(res,503,'Doğrulama e-postası gönderilemedi. Lütfen tekrar dene.'); }
+  res.json({ message: 'Yeni kod gönderildi.', devCode });
+}));
+app.post('/api/login', wrap(async (req, res) => {
+  const user = db.prepare('SELECT * FROM users WHERE email=?').get(clean(req.body.email, 160).toLowerCase());
+  if (!user || !(await verifyPassword(String(req.body.password || ''), user.password_hash))) return fail(res, 401, 'E-posta veya şifre hatalı.');
+  if (user.closed_at) return fail(res, 403, 'Bu hesap kapatılmış. Destek ile iletişime geç.');
+  setSession(res, user.id, req.body.rememberMe === true);
+  res.json({ user: publicUser(user) });
+}));
+app.post('/api/logout', (req, res) => {
+  const token = /(?:^|; )up_session=([^;]+)/.exec(req.headers.cookie || '')?.[1];
+  if (token) db.prepare('DELETE FROM sessions WHERE token_hash=?').run(hash(token));
+  res.clearCookie('up_session', { path: '/' });
+  res.json({ ok: true });
+});
+app.patch('/api/me/profile', (req, res) => {
+  const user = requireUser(req,res); if (!user) return;
+  const name = clean(req.body.name,80);
+  const university = clean(req.body.university,100);
+  if (name.length < 2 || !universityNames.has(university)) return fail(res,400,'Ad ve listeden üniversite seçimi gerekli.');
+  db.prepare('UPDATE users SET name=?,university=? WHERE id=?').run(name,university,user.id);
+  res.json({ user:publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(user.id)) });
+});
+app.patch('/api/me/email', wrap(async (req, res) => {
+  const user = requireUser(req,res); if (!user) return;
+  const email = clean(req.body.email,160).toLowerCase();
+  if (!/^\S+@\S+\.\S+$/.test(email) || email === user.email) return fail(res,400,'Farklı ve geçerli bir e-posta gir.');
+  if (!await verifyPassword(String(req.body.password || ''),user.password_hash)) return fail(res,403,'Mevcut şifreni doğru gir.');
+  if (db.prepare('SELECT id FROM users WHERE email=? AND id<>?').get(email,user.id)) return fail(res,409,'Bu e-posta zaten kayıtlı.');
+  db.prepare('UPDATE users SET email=?,email_verified=0 WHERE id=?').run(email,user.id);
+  let devCode;
+  if (mailer || testEmailCodes) {
+    try { devCode = await issueCode(db.prepare('SELECT * FROM users WHERE id=?').get(user.id)); }
+    catch {
+      db.prepare('DELETE FROM verification_codes WHERE user_id=?').run(user.id);
+      db.prepare('UPDATE users SET email=?,email_verified=? WHERE id=?').run(user.email,user.email_verified,user.id);
+      return fail(res,503,'Doğrulama e-postası gönderilemedi; e-posta değiştirilmedi.');
+    }
+  } else db.prepare('DELETE FROM verification_codes WHERE user_id=?').run(user.id);
+  res.json({ user:publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(user.id)), verificationRequired:!!(mailer || testEmailCodes), devCode });
+}));
+app.patch('/api/me/phone', wrap(async (req, res) => {
+  const user = requireUser(req,res); if (!user) return;
+  if (!await verifyPassword(String(req.body.password || ''),user.password_hash)) return fail(res,403,'Mevcut şifreni doğru gir.');
+  const phone = clean(req.body.phone,20).replace(/\s/g,'');
+  if (!/^(?:\+90|0)?5\d{9}$/.test(phone)) return fail(res,400,'Geçerli bir cep telefonu numarası gir.');
+  db.prepare('UPDATE users SET phone=? WHERE id=?').run(phone,user.id);
+  res.json({ user:publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(user.id)) });
+}));
+app.post('/api/me/verify-email', (req, res) => {
+  const user = requireUser(req,res); if (!user) return;
+  const code = clean(req.body.code,10);
+  const record = db.prepare('SELECT * FROM verification_codes WHERE user_id=?').get(user.id);
+  if (!record || record.expires_at < Date.now() || record.code_hash !== hash(code)) return fail(res,400,'Kod geçersiz veya süresi dolmuş.');
+  db.prepare('UPDATE users SET email_verified=1 WHERE id=?').run(user.id);
+  db.prepare('DELETE FROM verification_codes WHERE user_id=?').run(user.id);
+  res.json({ user:publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(user.id)) });
+});
+
+app.get('/api/support-application', (req,res) => {
+  const user=requireUser(req,res); if(!user)return;
+  res.json({ application:db.prepare('SELECT reason,family_income,identity_last4,status,submitted_at,reviewed_at FROM support_applications WHERE user_id=?').get(user.id)||null });
+});
+app.post('/api/support-application', (req,res) => {
+  const user=requireUser(req,res); if(!user)return;
+  const reason=clean(req.body.reason,1000), incomeText=String(req.body.familyIncome ?? ''), income=Number(incomeText), last4=clean(req.body.identityLast4,4);
+  if(reason.length<30 || !/^\d+$/.test(incomeText) || !Number.isSafeInteger(income) || income<0 || income>1000000 || !/^\d{4}$/.test(last4)) return fail(res,400,'En az 30 karakterlik açıklama, aylık aile geliri ve kimlik numaranın son 4 hanesi gerekli.');
+  const existing=db.prepare('SELECT status FROM support_applications WHERE user_id=?').get(user.id);
+  if(existing?.status==='approved') return fail(res,409,'Destek başvurun zaten kabul edildi.');
+  db.prepare(`INSERT INTO support_applications(user_id,reason,family_income,identity_last4,status) VALUES(?,?,?,?, 'pending')
+    ON CONFLICT(user_id) DO UPDATE SET reason=excluded.reason,family_income=excluded.family_income,identity_last4=excluded.identity_last4,status='pending',submitted_at=CURRENT_TIMESTAMP,reviewed_at=NULL`).run(user.id,reason,income,last4);
+  db.prepare('UPDATE users SET support_verified=0 WHERE id=?').run(user.id);
+  res.status(201).json({ok:true});
+});
+
+const normalizeSearch = value => String(value || '').toLocaleLowerCase('tr-TR').replace(/ı/g,'i').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/æ/g,'ae').replace(/œ/g,'oe');
+const searchWords = value => normalizeSearch(value).split(/[^a-z0-9]+/).filter(Boolean);
+const closeWord = (query, word) => {
+  if (word.includes(query)) return true;
+  const limit=query.length>=7?2:query.length>=4?1:0;
+  if (!limit || Math.abs(query.length-word.length)>limit) return false;
+  const rows=Array.from({length:query.length+1},()=>Array(word.length+1).fill(0));
+  for(let i=0;i<=query.length;i++)rows[i][0]=i;
+  for(let j=0;j<=word.length;j++)rows[0][j]=j;
+  for(let i=1;i<=query.length;i++){
+    let best=limit+1;
+    for(let j=1;j<=word.length;j++){
+      rows[i][j]=Math.min(rows[i-1][j]+1,rows[i][j-1]+1,rows[i-1][j-1]+(query[i-1]===word[j-1]?0:1));
+      if(i>1 && j>1 && query[i-1]===word[j-2] && query[i-2]===word[j-1])rows[i][j]=Math.min(rows[i][j],rows[i-2][j-2]+1);
+      best=Math.min(best,rows[i][j]);
+    }
+    if(best>limit)return false;
+  }
+  return rows[query.length][word.length]<=limit;
+};
+const listingSearchScore = (row, normalizedQuery, queryWords) => {
+  const title=normalizeSearch(row.title), description=normalizeSearch(row.description);
+  if(title.includes(normalizedQuery))return 0;
+  if(description.includes(normalizedQuery))return 1;
+  const titleWords=searchWords(row.title);
+  if(queryWords.every(query=>titleWords.some(word=>closeWord(query,word))))return 2;
+  const allWords=titleWords.concat(searchWords(row.description));
+  if(queryWords.every(query=>allWords.some(word=>closeWord(query,word))))return 3;
+  return null;
+};
+const listingSelect = `SELECT l.*, u.name AS seller_name, u.closed_at AS seller_closed,
+ (SELECT filename FROM listing_images i WHERE i.listing_id=l.id ORDER BY position LIMIT 1) AS cover,
+ (SELECT COUNT(*) FROM listing_images i WHERE i.listing_id=l.id) AS image_count
+ FROM listings l JOIN users u ON u.id=l.seller_id`;
+app.get('/api/listings', (req, res) => {
+  const me = currentUser(req);
+  const where = [`l.status='active'`, 'u.closed_at IS NULL'], args = [];
+  if (!me?.support_verified) where.push("l.kind='sale'");
+  else { where.push("(l.kind='sale' OR l.university=?)"); args.push(me.university); }
+  for (const [param, column] of [['university','university'],['category','category'],['kind','kind']]) {
+    if (req.query[param]) { where.push(`l.${column}=?`); args.push(clean(req.query[param], 100)); }
+  }
+  if (req.query.maxPrice) { where.push('l.price<=?'); args.push(Number(req.query.maxPrice) * 100); }
+  const query = normalizeSearch(clean(req.query.q, 100)).trim();
+  const candidates = db.prepare(`${listingSelect} WHERE ${where.join(' AND ')} ORDER BY l.created_at DESC`).all(...args);
+  const terms=searchWords(query);
+  const rows = (terms.length ? candidates.map(row=>({row,score:listingSearchScore(row,query,terms)})).filter(item=>item.score!==null).sort((a,b)=>a.score-b.score).map(item=>item.row) : candidates).slice(0,100);
+  const favoriteIds = me ? new Set(db.prepare('SELECT listing_id FROM favorites WHERE user_id=?').all(me.id).map(row=>row.listing_id)) : new Set();
+  res.json({ listings: rows.map(row=>({ ...row, favorite:favoriteIds.has(row.id) })) });
+});
+app.get('/api/listings/:id', (req, res) => {
+  const row = db.prepare(`${listingSelect} WHERE l.id=?`).get(req.params.id);
+  if (!row) return fail(res, 404, 'İlan bulunamadı.');
+  const me = currentUser(req);
+  if (row.seller_closed) return fail(res,404,'İlan bulunamadı.');
+  if (['expired','removed'].includes(row.status) && me?.id !== row.seller_id) return fail(res,404,'İlan bulunamadı.');
+  if (row.kind === 'donation' && !me?.support_verified && me?.id !== row.seller_id) return fail(res,404,'İlan bulunamadı.');
+  if (row.kind === 'donation' && me && row.university !== me.university && row.seller_id !== me.id) return fail(res,404,'İlan bulunamadı.');
+  const images = db.prepare('SELECT filename,position FROM listing_images WHERE listing_id=? ORDER BY position').all(row.id);
+  const favorite = me ? !!db.prepare('SELECT 1 FROM favorites WHERE user_id=? AND listing_id=?').get(me.id,row.id) : false;
+  res.json({ listing: { ...row, images, favorite } });
+});
+app.get('/api/sellers/:id/listings', (req, res) => {
+  const seller = db.prepare('SELECT id,name,university FROM users WHERE id=? AND closed_at IS NULL').get(req.params.id);
+  if (!seller) return fail(res,404,'Satıcı bulunamadı.');
+  const listings = db.prepare(`${listingSelect} WHERE l.seller_id=? AND l.kind='sale' AND l.status='active' ORDER BY l.created_at DESC`).all(seller.id);
+  res.json({ seller, listings });
+});
+const upload = multer({ storage: multer.memoryStorage(), limits: { files: 6, fileSize: 5 * 1024 * 1024 } });
+const imageType = buffer => buffer.subarray(0,3).equals(Buffer.from([0xff,0xd8,0xff])) ? 'jpg' : buffer.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])) ? 'png' : buffer.subarray(0,4).toString() === 'RIFF' && buffer.subarray(8,12).toString() === 'WEBP' ? 'webp' : null;
+const voiceType = buffer => buffer.subarray(0,4).equals(Buffer.from([0x1a,0x45,0xdf,0xa3])) ? 'webm' : buffer.subarray(0,4).toString() === 'OggS' ? 'ogg' : buffer.length >= 12 && buffer.subarray(4,8).toString() === 'ftyp' ? 'mp4' : null;
+app.post('/api/listings', upload.array('photos',6), (req, res) => {
+  const user = requireUser(req,res); if (!user) return;
+  const kind = clean(req.body.kind), title = clean(req.body.title,100), description = clean(req.body.description,2000), category = clean(req.body.category,60), condition = clean(req.body.condition,40);
+  const priceText = String(req.body.price ?? '');
+  const price = kind === 'donation' ? 0 : Number(priceText) * 100;
+  if (!['sale','donation'].includes(kind) || !title || !description || !category || !condition || (kind === 'sale' && !/^\d{1,9}$/.test(priceText)) || !Number.isSafeInteger(price) || price < 0) return fail(res,400,'İlan bilgilerini kontrol et.');
+  if (!req.files?.length) return fail(res,400,'En az bir ürün fotoğrafı ekle.');
+  const types = req.files.map(file => imageType(file.buffer));
+  if (types.some(type => !type)) return fail(res,400,'Yalnızca JPEG, PNG veya WebP fotoğraf yükle.');
+  const result = db.prepare('INSERT INTO listings(seller_id,kind,title,description,category,condition,price,university,campus) VALUES(?,?,?,?,?,?,?,?,?)').run(user.id,kind,title,description,category,condition,price,user.university,'');
+  req.files.forEach((file,index) => {
+    const filename = `${randomBytes(16).toString('hex')}.${types[index]}`;
+    fs.writeFileSync(path.join(uploadDir,filename),file.buffer);
+    db.prepare('INSERT INTO listing_images(listing_id,filename,position) VALUES(?,?,?)').run(result.lastInsertRowid,filename,index);
+  });
+  res.status(201).json({ id: Number(result.lastInsertRowid) });
+});
+app.patch('/api/listings/:id', upload.array('photos',6), (req, res) => {
+  const user = requireUser(req,res); if (!user) return;
+  const listing = db.prepare('SELECT * FROM listings WHERE id=?').get(req.params.id);
+  if (!listing || listing.seller_id !== user.id) return fail(res,404,'İlan bulunamadı.');
+  const status = clean(req.body.status,20);
+  if (listing.status === 'expired' && status && status !== 'removed') return fail(res,409,'Süresi dolan ilan yeniden yayına alınamaz. Yeni bir ilan oluştur.');
+  if (status && !['active','reserved','sold','removed'].includes(status)) return fail(res,400,'Geçersiz durum.');
+  const title = clean(req.body.title ?? listing.title,100), description = clean(req.body.description ?? listing.description,2000);
+  const category=clean(req.body.category ?? listing.category,60),condition=clean(req.body.condition ?? listing.condition,40);
+  const priceText = req.body.price === undefined ? null : String(req.body.price);
+  const price = priceText === null ? listing.price : Number(priceText)*100;
+  if (!title || !description || !category || !condition || (listing.kind==='sale' && priceText !== null && !/^\d{1,9}$/.test(priceText)) || !Number.isSafeInteger(price) || price < 0) return fail(res,400,'İlan bilgilerini kontrol et.');
+  const existing=db.prepare('SELECT filename FROM listing_images WHERE listing_id=? ORDER BY position').all(listing.id).map(row=>row.filename);
+  let kept=existing;
+  if(req.body.keepPhotos!==undefined){
+    try{kept=JSON.parse(String(req.body.keepPhotos));}catch{return fail(res,400,'Fotoğraf seçimini kontrol et.');}
+    if(!Array.isArray(kept)||kept.some(name=>typeof name!=='string'||!existing.includes(name))||new Set(kept).size!==kept.length)return fail(res,400,'Fotoğraf seçimini kontrol et.');
+  }
+  const files=req.files||[];
+  if(kept.length+files.length<1||kept.length+files.length>6)return fail(res,400,'İlanda 1 ile 6 fotoğraf olmalı.');
+  const types=files.map(file=>imageType(file.buffer));
+  if(types.some(type=>!type))return fail(res,400,'Yalnızca JPEG, PNG veya WebP fotoğraf yükle.');
+  const added=[];
+  try{
+    files.forEach((file,index)=>{const filename=`${randomBytes(16).toString('hex')}.${types[index]}`;fs.writeFileSync(path.join(uploadDir,filename),file.buffer);added.push(filename);});
+    transaction(()=>{
+      db.prepare('UPDATE listings SET title=?,description=?,category=?,condition=?,price=?,status=? WHERE id=?').run(title,description,category,condition,listing.kind === 'donation' ? 0 : price,status || listing.status,listing.id);
+      db.prepare('DELETE FROM listing_images WHERE listing_id=?').run(listing.id);
+      [...kept,...added].forEach((filename,position)=>db.prepare('INSERT INTO listing_images(listing_id,filename,position) VALUES(?,?,?)').run(listing.id,filename,position));
+    });
+  }catch(error){added.forEach(filename=>fs.rmSync(path.join(uploadDir,filename),{force:true}));throw error;}
+  existing.filter(filename=>!kept.includes(filename)).forEach(filename=>fs.rmSync(path.join(uploadDir,filename),{force:true}));
+  res.json({ ok:true });
+});
+app.get('/api/mine', (req, res) => {
+  const user = requireUser(req,res); if (!user) return;
+  res.json({ listings: db.prepare(`${listingSelect} WHERE l.seller_id=? ORDER BY l.created_at DESC`).all(user.id) });
+});
+app.get('/api/favorites', (req, res) => {
+  const user = requireUser(req,res); if (!user) return;
+  res.json({ listings: db.prepare(`${listingSelect} JOIN favorites f ON f.listing_id=l.id WHERE f.user_id=? AND l.status NOT IN ('expired','removed') AND u.closed_at IS NULL AND (l.kind='sale' OR ?=1 OR l.seller_id=?) ORDER BY f.rowid DESC`).all(user.id,user.support_verified,user.id).map(row=>({ ...row, favorite:true })) });
+});
+app.post('/api/listings/:id/favorite', (req, res) => {
+  const user = requireUser(req,res); if (!user) return;
+  const listing = db.prepare('SELECT kind,seller_id,status FROM listings WHERE id=?').get(req.params.id);
+  if (!listing || listing.status === 'expired' || (listing.kind === 'donation' && !user.support_verified && listing.seller_id !== user.id)) return fail(res,404,'İlan bulunamadı.');
+  db.prepare('INSERT OR IGNORE INTO favorites(user_id,listing_id) VALUES(?,?)').run(user.id,req.params.id);
+  res.json({ favorite:true });
+});
+app.delete('/api/listings/:id/favorite', (req, res) => {
+  const user = requireUser(req,res); if (!user) return;
+  db.prepare('DELETE FROM favorites WHERE user_id=? AND listing_id=?').run(user.id,req.params.id);
+  res.json({ favorite:false });
+});
+app.post('/api/listings/:id/conversation', (req, res) => {
+  const user = requireUser(req,res); if (!user) return;
+  const listing = db.prepare('SELECT * FROM listings WHERE id=?').get(req.params.id);
+  if (!listing || listing.status !== 'active' || listing.kind !== 'sale') return fail(res,404,'Aktif ilan bulunamadı.');
+  if (listing.seller_id === user.id) return fail(res,400,'Kendi ilanına mesaj gönderemezsin.');
+  db.prepare('INSERT OR IGNORE INTO conversations(listing_id,buyer_id,seller_id) VALUES(?,?,?)').run(listing.id,user.id,listing.seller_id);
+  const conversation = db.prepare('SELECT id FROM conversations WHERE listing_id=? AND buyer_id=?').get(listing.id,user.id);
+  res.json({ id: conversation.id });
+});
+app.get('/api/conversations', (req, res) => {
+  const user = requireUser(req,res); if (!user) return;
+  const rows = db.prepare(`SELECT c.id,c.listing_id,l.title,l.status,u.id AS other_id,u.name AS other_name,u.university AS other_university,
+    (SELECT CASE WHEN m.voice_filename IS NOT NULL THEN CASE WHEN m.body='' THEN '🎤 Sesli mesaj' ELSE '🎤 ' || m.body END WHEN m.photo_filename IS NOT NULL THEN CASE WHEN m.body='' THEN '📷 Fotoğraf' ELSE '📷 ' || m.body END ELSE m.body END FROM messages m WHERE m.conversation_id=c.id ORDER BY id DESC LIMIT 1) AS last_message,
+    (SELECT created_at FROM messages m WHERE m.conversation_id=c.id ORDER BY id DESC LIMIT 1) AS last_at,
+    (SELECT COUNT(*) FROM messages m WHERE m.conversation_id=c.id AND m.sender_id<>? AND m.read_at IS NULL) AS unread_count
+    FROM conversations c JOIN listings l ON l.id=c.listing_id JOIN users u ON u.id=CASE WHEN c.buyer_id=? THEN c.seller_id ELSE c.buyer_id END
+     WHERE (c.buyer_id=? OR c.seller_id=?) AND (l.kind='sale' OR ?=1 OR l.seller_id=?) ORDER BY COALESCE(last_at,c.created_at) DESC`).all(user.id,user.id,user.id,user.id,user.support_verified,user.id);
+  res.json({ conversations:rows });
+});
+app.get('/api/message-events', (req,res) => {
+  const user=requireUser(req,res); if(!user)return;
+  res.setHeader('Content-Type','text/event-stream');
+  res.setHeader('Cache-Control','no-cache, no-transform');
+  res.setHeader('Connection','keep-alive');
+  res.flushHeaders();
+  res.write(': connected\n\n');
+  if(!messageStreams.has(user.id))messageStreams.set(user.id,new Set());
+  messageStreams.get(user.id).add(res);
+  const heartbeat=setInterval(()=>res.write(': ping\n\n'),25000);
+  req.on('close',()=>{clearInterval(heartbeat);messageStreams.get(user.id)?.delete(res);if(!messageStreams.get(user.id)?.size)messageStreams.delete(user.id);});
+});
+app.get('/api/unread-count', (req, res) => {
+  const user = requireUser(req,res); if (!user) return;
+  const count = db.prepare(`SELECT COUNT(*) AS count FROM messages m
+    JOIN conversations c ON c.id=m.conversation_id JOIN listings l ON l.id=c.listing_id
+    WHERE (c.buyer_id=? OR c.seller_id=?) AND m.sender_id<>? AND m.read_at IS NULL
+    AND (l.kind='sale' OR ?=1 OR l.seller_id=?)`).get(user.id,user.id,user.id,user.support_verified,user.id).count;
+  res.json({ count });
+});
+app.get('/api/conversations/:id/messages', (req, res) => {
+  const user = requireUser(req,res); if (!user) return;
+  const conversation = db.prepare('SELECT * FROM conversations WHERE id=?').get(req.params.id);
+  if (!conversation || ![conversation.buyer_id,conversation.seller_id].includes(user.id)) return fail(res,404,'Konuşma bulunamadı.');
+  db.prepare('UPDATE messages SET read_at=? WHERE conversation_id=? AND sender_id<>? AND read_at IS NULL').run(Date.now(),conversation.id,user.id);
+  res.json({ messages:db.prepare('SELECT id,sender_id,body,created_at,photo_filename,voice_filename FROM messages WHERE conversation_id=? ORDER BY id ASC LIMIT 200').all(conversation.id) });
+});
+app.post('/api/conversations/:id/messages', upload.fields([{name:'photo',maxCount:1},{name:'voice',maxCount:1}]), (req, res) => {
+  const user = requireUser(req,res); if (!user) return;
+  const conversation = db.prepare('SELECT * FROM conversations WHERE id=?').get(req.params.id);
+  if (!conversation || ![conversation.buyer_id,conversation.seller_id].includes(user.id)) return fail(res,404,'Konuşma bulunamadı.');
+  const recipientId = conversation.buyer_id === user.id ? conversation.seller_id : conversation.buyer_id;
+  if (db.prepare('SELECT closed_at FROM users WHERE id=?').get(recipientId)?.closed_at) return fail(res,409,'Bu hesap artık mesaj alamıyor.');
+  const body = clean(req.body?.body,2000);
+  const photo=req.files?.photo?.[0], voice=req.files?.voice?.[0];
+  if (!body && !photo && !voice) return fail(res,400,'Boş mesaj gönderilemez.');
+  if (photo && voice) return fail(res,400,'Bir mesajda yalnızca bir fotoğraf veya ses kaydı gönder.');
+  const photoType=photo?imageType(photo.buffer):null, audioType=voice?voiceType(voice.buffer):null;
+  if(photo && !photoType)return fail(res,400,'Yalnızca JPEG, PNG veya WebP fotoğraf yükle.');
+  if(voice && !audioType)return fail(res,400,'Desteklenmeyen ses kaydı biçimi.');
+  const filename=photoType?`${randomBytes(16).toString('hex')}.${photoType}`:null;
+  const voiceFilename=audioType?`${randomBytes(16).toString('hex')}.${audioType}`:null;
+  if(filename)fs.writeFileSync(path.join(messageUploadDir,filename),photo.buffer);
+  if(voiceFilename)fs.writeFileSync(path.join(voiceUploadDir,voiceFilename),voice.buffer);
+  let messageId;
+  try { messageId=db.prepare('INSERT INTO messages(conversation_id,sender_id,body,photo_filename,voice_filename) VALUES(?,?,?,?,?)').run(conversation.id,user.id,body,filename,voiceFilename).lastInsertRowid; }
+  catch(error){if(filename)fs.rmSync(path.join(messageUploadDir,filename),{force:true});if(voiceFilename)fs.rmSync(path.join(voiceUploadDir,voiceFilename),{force:true});throw error;}
+  notifyConversation(conversation,user.id);
+  res.status(201).json({ ok:true,id:Number(messageId) });
+});
+app.get('/api/messages/:id/photo', (req,res) => {
+  const user=requireUser(req,res);if(!user)return;
+  const image=db.prepare(`SELECT m.photo_filename,c.buyer_id,c.seller_id FROM messages m JOIN conversations c ON c.id=m.conversation_id WHERE m.id=?`).get(req.params.id);
+  if(!image?.photo_filename || ![image.buyer_id,image.seller_id].includes(user.id))return res.sendStatus(404);
+  res.setHeader('Cache-Control','private, no-store');
+  res.type(path.extname(image.photo_filename));
+  res.sendFile(path.join(messageUploadDir,image.photo_filename));
+});
+app.get('/api/conversations/:id/handoff', (req,res) => {
+  const user=requireUser(req,res);if(!user)return;
+  const conversation=db.prepare('SELECT * FROM conversations WHERE id=?').get(req.params.id);
+  if(!conversation || ![conversation.buyer_id,conversation.seller_id].includes(user.id)) return fail(res,404,'Konuşma bulunamadı.');
+  res.json({handoff:db.prepare('SELECT * FROM handoffs WHERE conversation_id=?').get(conversation.id)||null});
+});
+app.post('/api/conversations/:id/handoff', (req,res) => {
+  const user=requireUser(req,res);if(!user)return;
+  const conversation=db.prepare('SELECT * FROM conversations WHERE id=?').get(req.params.id);
+  if(!conversation || ![conversation.buyer_id,conversation.seller_id].includes(user.id)) return fail(res,404,'Konuşma bulunamadı.');
+  const place=clean(req.body.place,120), meetingAt=clean(req.body.meetingAt,40);
+  if(!place || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(meetingAt) || !Number.isFinite(Date.parse(meetingAt)) || Date.parse(meetingAt)<Date.now()) return fail(res,400,'Gelecekte bir zaman ve buluşma noktası seç.');
+  db.prepare(`INSERT INTO handoffs(conversation_id,place,meeting_at,proposed_by,status) VALUES(?,?,?,?, 'proposed')
+    ON CONFLICT(conversation_id) DO UPDATE SET place=excluded.place,meeting_at=excluded.meeting_at,proposed_by=excluded.proposed_by,status='proposed'`).run(conversation.id,place,meetingAt,user.id);
+  res.json({ok:true});
+});
+app.patch('/api/conversations/:id/handoff', (req,res) => {
+  const user=requireUser(req,res);if(!user)return;
+  const conversation=db.prepare('SELECT * FROM conversations WHERE id=?').get(req.params.id);
+  if(!conversation || ![conversation.buyer_id,conversation.seller_id].includes(user.id)) return fail(res,404,'Konuşma bulunamadı.');
+  const handoff=db.prepare('SELECT * FROM handoffs WHERE conversation_id=?').get(conversation.id);
+  if(!handoff) return fail(res,404,'Buluşma önerisi bulunamadı.');
+  const status=clean(req.body.status,20);
+  if(status==='confirmed' && (handoff.status!=='proposed' || handoff.proposed_by===user.id)) return fail(res,409,'Buluşmayı diğer taraf onaylamalı.');
+  if(status==='completed' && handoff.status!=='confirmed') return fail(res,409,'Önce buluşmayı onaylayın.');
+  if(!['confirmed','completed','cancelled'].includes(status)) return fail(res,400,'Geçersiz durum.');
+  db.prepare('UPDATE handoffs SET status=? WHERE conversation_id=?').run(status,conversation.id);
+  res.json({ok:true});
+});
+app.post('/api/listings/:id/offers', (req, res) => {
+  const user = requireUser(req,res); if (!user) return;
+  const listing = db.prepare('SELECT * FROM listings WHERE id=?').get(req.params.id);
+  const amount = Math.round(Number(req.body.amount)*100);
+  if (!listing || listing.kind !== 'sale' || listing.status !== 'active') return fail(res,404,'Satış ilanı bulunamadı.');
+  if (listing.seller_id === user.id) return fail(res,403,'Bu ilana teklif veremezsin.');
+  if (!Number.isInteger(amount) || amount <= 0) return fail(res,400,'Geçerli bir teklif tutarı gir.');
+  const conversationId = transaction(() => {
+    db.prepare('INSERT INTO offers(listing_id,buyer_id,amount) VALUES(?,?,?)').run(listing.id,user.id,amount);
+    db.prepare('INSERT OR IGNORE INTO conversations(listing_id,buyer_id,seller_id) VALUES(?,?,?)').run(listing.id,user.id,listing.seller_id);
+    const conversation = db.prepare('SELECT id FROM conversations WHERE listing_id=? AND buyer_id=?').get(listing.id,user.id);
+    db.prepare('INSERT INTO messages(conversation_id,sender_id,body) VALUES(?,?,?)').run(conversation.id,user.id,`${new Intl.NumberFormat('tr-TR',{style:'currency',currency:'TRY',maximumFractionDigits:0}).format(amount/100)} fiyat teklifi gönderdi.`);
+    return conversation.id;
+  });
+  notifyConversation({id:conversationId,buyer_id:user.id,seller_id:listing.seller_id},user.id);
+  res.status(201).json({ ok:true, conversationId });
+});
+app.get('/api/offers', (req, res) => {
+  const user = requireUser(req,res); if (!user) return;
+  res.json({ offers:db.prepare(`SELECT o.*,l.title,u.name AS buyer_name FROM offers o JOIN listings l ON l.id=o.listing_id JOIN users u ON u.id=o.buyer_id WHERE l.seller_id=? ORDER BY o.id DESC`).all(user.id) });
+});
+app.patch('/api/offers/:id', (req, res) => {
+  const user = requireUser(req,res); if (!user) return;
+  const offer = db.prepare('SELECT o.*,l.seller_id,l.status AS listing_status FROM offers o JOIN listings l ON l.id=o.listing_id WHERE o.id=?').get(req.params.id);
+  if (!offer || offer.seller_id !== user.id) return fail(res,404,'Teklif bulunamadı.');
+  const status = clean(req.body.status);
+  if (!['accepted','rejected'].includes(status) || offer.status !== 'pending' || (status==='accepted' && offer.listing_status!=='active')) return fail(res,400,'Teklif yanıtlanamıyor.');
+  db.prepare('UPDATE offers SET status=? WHERE id=?').run(status,offer.id);
+  if (status === 'accepted') db.prepare("UPDATE listings SET status='reserved' WHERE id=? AND status='active'").run(offer.listing_id);
+  res.json({ ok:true });
+});
+app.post('/api/listings/:id/requests', (req, res) => {
+  const user = requireUser(req,res); if (!user) return;
+  if (!user.support_verified) return fail(res,403,'Ücretsiz ürünleri yalnızca destek başvurusu kabul edilen hesaplar talep edebilir.');
+  const listing = db.prepare('SELECT * FROM listings WHERE id=?').get(req.params.id);
+  if (!listing || listing.kind !== 'donation' || listing.status !== 'active') return fail(res,404,'Ücretsiz ilan bulunamadı.');
+  if (listing.seller_id === user.id || listing.university !== user.university) return fail(res,403,'Bu ürünü talep edemezsin.');
+  const pendingCount = db.prepare("SELECT COUNT(*) AS count FROM donation_requests WHERE requester_id=? AND status IN ('pending','accepted')").get(user.id).count;
+  if (pendingCount >= 3) return fail(res,429,'Aynı anda en fazla 3 açık Dayanışma talebin olabilir.');
+  const note = clean(req.body.note,500);
+  if (!note) return fail(res,400,'Kısa bir talep notu yaz.');
+  try { db.prepare('INSERT INTO donation_requests(listing_id,requester_id,note) VALUES(?,?,?)').run(listing.id,user.id,note); }
+  catch { return fail(res,409,'Bu ürüne zaten talep gönderdin.'); }
+  res.status(201).json({ ok:true });
+});
+app.get('/api/donation-requests', (req, res) => {
+  const user = requireUser(req,res); if (!user) return;
+  const rows = db.prepare(`SELECT r.id,r.listing_id,r.note,r.status,r.created_at,l.title,u.name AS requester_name
+    FROM donation_requests r JOIN listings l ON l.id=r.listing_id JOIN users u ON u.id=r.requester_id
+    WHERE l.seller_id=? ORDER BY r.id DESC`).all(user.id);
+  res.json({ requests:rows });
+});
+app.get('/api/my-donation-requests', (req, res) => {
+  const user = requireUser(req,res); if (!user) return;
+  const requests = db.prepare(`SELECT r.id,r.listing_id,r.status,r.created_at,l.title,l.university
+    FROM donation_requests r JOIN listings l ON l.id=r.listing_id
+    WHERE r.requester_id=? ORDER BY r.id DESC`).all(user.id);
+  res.json({ requests });
+});
+app.patch('/api/donation-requests/:id', (req, res) => {
+  const user = requireUser(req,res); if (!user) return;
+  const request = db.prepare('SELECT r.*,l.seller_id,l.status AS listing_status FROM donation_requests r JOIN listings l ON l.id=r.listing_id WHERE r.id=?').get(req.params.id);
+  if (!request || request.seller_id !== user.id) return fail(res,404,'Talep bulunamadı.');
+  const status = clean(req.body.status);
+  if (!['accepted','rejected','completed'].includes(status)) return fail(res,400,'Geçersiz durum.');
+  if (status === 'accepted' && (request.status !== 'pending' || request.listing_status !== 'active')) return fail(res,409,'Ürün artık uygun değil.');
+  if (status === 'completed' && request.status !== 'accepted') return fail(res,409,'Önce talebi kabul et.');
+  db.prepare('UPDATE donation_requests SET status=? WHERE id=?').run(status,request.id);
+  if (status === 'accepted') {
+    db.prepare("UPDATE listings SET status='reserved' WHERE id=?").run(request.listing_id);
+    db.prepare("UPDATE donation_requests SET status='rejected' WHERE listing_id=? AND id<>? AND status='pending'").run(request.listing_id,request.id);
+  }
+  if (status === 'completed') db.prepare("UPDATE listings SET status='sold' WHERE id=?").run(request.listing_id);
+  res.json({ ok:true });
+});
+app.post('/api/reports', (req, res) => {
+  const user = requireUser(req,res); if (!user) return;
+  const reason = clean(req.body.reason,500), listingId = Number(req.body.listingId), messageId=Number(req.body.messageId);
+  if(!reason)return fail(res,400,'Şikâyet nedeni gerekli.');
+  if(messageId){
+    const message=db.prepare('SELECT m.sender_id,c.buyer_id,c.seller_id FROM messages m JOIN conversations c ON c.id=m.conversation_id WHERE m.id=?').get(messageId);
+    if(!message || ![message.buyer_id,message.seller_id].includes(user.id) || message.sender_id===user.id)return fail(res,404,'Mesaj bulunamadı.');
+    db.prepare('INSERT INTO reports(reporter_id,message_id,reason) VALUES(?,?,?)').run(user.id,messageId,reason);
+  }else{
+    if(!db.prepare('SELECT 1 FROM listings WHERE id=?').get(listingId))return fail(res,400,'İlan gerekli.');
+    db.prepare('INSERT INTO reports(reporter_id,listing_id,reason) VALUES(?,?,?)').run(user.id,listingId,reason);
+  }
+  res.status(201).json({ ok:true });
+});
+app.get('/api/admin/queue', (req, res) => {
+  if (!requireAdmin(req,res)) return;
+  res.json({ support:db.prepare("SELECT a.user_id,a.reason,a.family_income,a.identity_last4,a.status,a.submitted_at,a.reviewed_at,u.name,u.email,u.phone,u.university,u.email_verified,u.created_at FROM support_applications a JOIN users u ON u.id=a.user_id WHERE u.closed_at IS NULL ORDER BY CASE WHEN a.status='pending' THEN 0 ELSE 1 END,a.submitted_at DESC").all(), reports:db.prepare("SELECT r.*,m.conversation_id,m.sender_id AS message_sender_id FROM reports r LEFT JOIN messages m ON m.id=r.message_id WHERE r.status='open' ORDER BY r.id DESC").all() });
+});
+app.get('/api/messages/:id/voice', (req,res) => {
+  const user=requireUser(req,res);if(!user)return;
+  const audio=db.prepare('SELECT m.voice_filename,c.buyer_id,c.seller_id FROM messages m JOIN conversations c ON c.id=m.conversation_id WHERE m.id=?').get(req.params.id);
+  if(!audio?.voice_filename || ![audio.buyer_id,audio.seller_id].includes(user.id))return res.sendStatus(404);
+  const type={webm:'audio/webm',ogg:'audio/ogg',mp4:'audio/mp4'}[path.extname(audio.voice_filename).slice(1)];
+  if(!type)return res.sendStatus(404);
+  res.setHeader('Cache-Control','private, no-store');
+  res.type(type);
+  res.sendFile(path.join(voiceUploadDir,audio.voice_filename));
+});
+app.get('/api/admin/accounts', (req, res) => {
+  if (!requireAdmin(req,res)) return;
+  const accounts = db.prepare(`SELECT u.id,u.name,u.email,u.phone,u.university,u.role,u.email_verified,u.created_at,u.closed_at,
+    (SELECT COUNT(*) FROM listings l WHERE l.seller_id=u.id) AS listing_count,
+    (SELECT status FROM support_applications a WHERE a.user_id=u.id) AS support_status
+    FROM users u ORDER BY u.id DESC`).all();
+  res.json({ total:accounts.length, active:accounts.filter(account=>!account.closed_at).length, accounts });
+});
+app.get('/api/admin/accounts/:id/conversations', (req,res) => {
+  if(!requireAdmin(req,res))return;
+  const account=db.prepare('SELECT id,name FROM users WHERE id=?').get(req.params.id);
+  if(!account)return fail(res,404,'Hesap bulunamadı.');
+  const conversations=db.prepare(`SELECT c.id,c.listing_id,l.title,
+    CASE WHEN c.buyer_id=? THEN seller.name ELSE buyer.name END AS other_name,
+    (SELECT MAX(m.created_at) FROM messages m WHERE m.conversation_id=c.id) AS last_at,
+    (SELECT COUNT(*) FROM messages m WHERE m.conversation_id=c.id) AS message_count
+    FROM conversations c JOIN listings l ON l.id=c.listing_id
+    JOIN users buyer ON buyer.id=c.buyer_id JOIN users seller ON seller.id=c.seller_id
+    WHERE c.buyer_id=? OR c.seller_id=? ORDER BY last_at DESC,c.id DESC`).all(account.id,account.id,account.id);
+  res.json({account,conversations});
+});
+app.post('/api/admin/conversations/:id/review', (req,res) => {
+  const admin=requireAdmin(req,res);if(!admin)return;
+  const reason=clean(req.body?.reason,500);
+  if(reason.length<10)return fail(res,400,'İnceleme gerekçesini en az 10 karakterle yaz.');
+  const conversation=db.prepare('SELECT id FROM conversations WHERE id=?').get(req.params.id);
+  if(!conversation)return fail(res,404,'Konuşma bulunamadı.');
+  db.prepare('INSERT INTO admin_message_reviews(admin_id,conversation_id,reason) VALUES(?,?,?)').run(admin.id,conversation.id,reason);
+  const messages=db.prepare(`SELECT m.id,m.sender_id,u.name AS sender_name,m.body,m.photo_filename,m.voice_filename,m.created_at
+    FROM messages m JOIN users u ON u.id=m.sender_id WHERE m.conversation_id=? ORDER BY m.id ASC`).all(conversation.id);
+  res.json({messages});
+});
+app.get('/api/admin/messages/:id/:kind', (req,res) => {
+  const admin=requireAdmin(req,res);if(!admin)return;
+  if(!['photo','voice'].includes(req.params.kind))return res.sendStatus(404);
+  const message=db.prepare(`SELECT m.conversation_id,m.photo_filename,m.voice_filename FROM messages m WHERE m.id=?`).get(req.params.id);
+  if(!message || !db.prepare('SELECT 1 FROM admin_message_reviews WHERE admin_id=? AND conversation_id=?').get(admin.id,message.conversation_id))return res.sendStatus(404);
+  const filename=req.params.kind==='photo'?message.photo_filename:message.voice_filename;
+  if(!filename)return res.sendStatus(404);
+  res.setHeader('Cache-Control','private, no-store');
+  res.type(path.extname(filename));
+  res.sendFile(path.join(req.params.kind==='photo'?messageUploadDir:voiceUploadDir,filename));
+});
+app.patch('/api/admin/accounts/:id', (req, res) => {
+  const admin=requireAdmin(req,res); if(!admin)return;
+  const account=db.prepare('SELECT id,role,closed_at FROM users WHERE id=?').get(req.params.id);
+  if(!account)return fail(res,404,'Hesap bulunamadı.');
+  if(account.role==='admin' || account.id===admin.id)return fail(res,403,'Yönetici hesabı kapatılamaz.');
+  if(typeof req.body.closed !== 'boolean')return fail(res,400,'Geçersiz hesap durumu.');
+  if(req.body.closed===!!account.closed_at)return res.json({ok:true});
+  transaction(()=>{
+    db.prepare('UPDATE users SET closed_at=? WHERE id=?').run(req.body.closed?new Date().toISOString():null,account.id);
+    if(req.body.closed){
+      db.prepare('DELETE FROM sessions WHERE user_id=?').run(account.id);
+      db.prepare("UPDATE listings SET status='removed' WHERE seller_id=? AND status IN ('active','reserved')").run(account.id);
+    }
+  });
+  if(req.body.closed){for(const response of messageStreams.get(account.id)||[])response.end();messageStreams.delete(account.id);}
+  res.json({ok:true});
+});
+app.patch('/api/admin/support/:id', (req,res) => {
+  if(!requireAdmin(req,res))return;
+  const status=clean(req.body.status,20);
+  if(!['approved','rejected'].includes(status))return fail(res,400,'Geçersiz karar.');
+  const application=db.prepare("SELECT user_id FROM support_applications WHERE user_id=? AND status='pending'").get(req.params.id);
+  if(!application)return fail(res,404,'Bekleyen başvuru bulunamadı.');
+  transaction(()=>{
+    db.prepare('UPDATE support_applications SET status=?,reviewed_at=CURRENT_TIMESTAMP WHERE user_id=?').run(status,application.user_id);
+    db.prepare('UPDATE users SET support_verified=? WHERE id=?').run(status==='approved'?1:0,application.user_id);
+  });
+  res.json({ok:true});
+});
+app.patch('/api/admin/reports/:id', (req, res) => {
+  if (!requireAdmin(req,res)) return;
+  const report = db.prepare('SELECT * FROM reports WHERE id=?').get(req.params.id);
+  if (!report) return fail(res,404,'Şikâyet bulunamadı.');
+  if (req.body.removeListing && report.listing_id) db.prepare("UPDATE listings SET status='removed' WHERE id=?").run(report.listing_id);
+  db.prepare("UPDATE reports SET status='closed' WHERE id=?").run(report.id);
+  res.json({ ok:true });
+});
+
+app.get('/uploads/:filename', (req, res) => {
+  expireListings();
+  if (!/^[a-f0-9]{32}\.(jpg|png|webp)$/.test(req.params.filename)) return res.sendStatus(404);
+  const image = db.prepare('SELECT l.kind,l.seller_id,l.university,l.status,u.closed_at AS seller_closed FROM listing_images i JOIN listings l ON l.id=i.listing_id JOIN users u ON u.id=l.seller_id WHERE i.filename=?').get(req.params.filename);
+  if (!image) return res.sendStatus(404);
+  if (image.seller_closed) return res.sendStatus(404);
+  const user = currentUser(req);
+  if (image.status === 'expired' && user?.id !== image.seller_id) return res.sendStatus(404);
+  if (image.kind === 'donation' && !user?.support_verified && user?.id !== image.seller_id) return res.sendStatus(404);
+  if (image.kind === 'donation' && user && image.university !== user.university && user.id !== image.seller_id) return res.sendStatus(404);
+  res.setHeader('Cache-Control',image.kind==='donation'?'private, no-store':'public, max-age=86400');
+  res.sendFile(path.join(uploadDir,req.params.filename));
+});
+app.use('/api', (req,res) => fail(res,404,'API yolu bulunamadı.'));
+app.use(express.static(path.join(root,'public')));
+app.use((req, res) => res.sendFile(path.join(root,'public','index.html')));
+app.use((err, req, res, next) => {
+  console.error(err);
+  if (err instanceof multer.MulterError) return fail(res,400,'Dosya sınırı aşıldı (en çok 6 fotoğraf; dosya başına 5 MB).');
+  return fail(res,500,'Beklenmeyen bir hata oluştu.');
+});
+app.listen(port, () => console.log(`UniPazar hazır: http://localhost:${port}`));
