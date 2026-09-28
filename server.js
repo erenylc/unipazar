@@ -1,3 +1,4 @@
+import {validateRegistration} from './public/registration-validation.js';
 import express from 'express';
 import multer from 'multer';
 import nodemailer from 'nodemailer';
@@ -11,7 +12,8 @@ import { fileURLToPath } from 'node:url';
 const scrypt = promisify(scryptCallback);
 const root = path.dirname(fileURLToPath(import.meta.url));
 if (fs.existsSync(path.join(root,'.env'))) process.loadEnvFile(path.join(root,'.env'));
-const dev = process.env.NODE_ENV !== 'production';
+const localMode=process.argv.includes('--local');
+const dev = localMode || process.env.NODE_ENV !== 'production';
 const testEmailCodes = process.env.NODE_ENV === 'test' && process.env.TEST_EMAIL_CODES === '1';
 const port = Number(process.env.PORT || 3000);
 const universities = JSON.parse(fs.readFileSync(path.join(root, 'universities.json'), 'utf8'));
@@ -140,6 +142,17 @@ const notifyConversation = (conversation, senderId) => {
   }
 };
 
+// Existing message IDs and foreign-key targets are preserved during this migration.
+if (db.prepare('PRAGMA table_info(conversations)').all().find(c=>c.name==='listing_id').notnull) {
+  db.exec('PRAGMA foreign_keys=OFF');
+  try { transaction(()=>db.exec(`CREATE TABLE conversations_new (
+    id INTEGER PRIMARY KEY, listing_id INTEGER REFERENCES listings(id), buyer_id INTEGER NOT NULL REFERENCES users(id),
+    seller_id INTEGER NOT NULL REFERENCES users(id), created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(listing_id,buyer_id));
+    INSERT INTO conversations_new SELECT * FROM conversations;
+    DROP TABLE conversations; ALTER TABLE conversations_new RENAME TO conversations;`)); }
+  finally {db.exec('PRAGMA foreign_keys=ON');}
+}
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS direct_admin_conversation ON conversations(buyer_id,seller_id) WHERE listing_id IS NULL');
 const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
@@ -210,19 +223,19 @@ const mailer = process.env.SMTP_HOST && process.env.SMTP_FROM ? nodemailer.creat
 const issueCode = async user => {
   const code = randomCode();
   db.prepare('INSERT OR REPLACE INTO verification_codes(user_id,code_hash,expires_at) VALUES(?,?,?)').run(user.id, hash(code), Date.now() + 15 * 60000);
-  if (mailer) await mailer.sendMail({ from: process.env.SMTP_FROM, to: user.email, subject: 'UniPazar e-posta doğrulama kodu', text: `Doğrulama kodun: ${code}. Kod 15 dakika geçerlidir.` });
+  if (mailer) await mailer.sendMail({ from: process.env.SMTP_FROM, to: user.email, subject: 'Üni Satış e-posta doğrulama kodu', text: `Doğrulama kodun: ${code}. Kod 15 dakika geçerlidir.` });
   return testEmailCodes ? code : undefined;
 };
 
-app.get('/api/me', (req, res) => res.json({ user: publicUser(currentUser(req)) }));
+app.get('/api/me', (req, res) => res.json({ user: publicUser(currentUser(req)),emailVerificationAvailable:!!mailer||testEmailCodes }));
 app.get('/api/universities', (_req, res) => res.json({ universities, emailVerificationAvailable: !!mailer || testEmailCodes }));
 app.post('/api/register', wrap(async (req, res) => {
-  const name = clean(req.body.name, 80), email = clean(req.body.email, 160).toLowerCase();
-  const university = clean(req.body.university, 100), password = String(req.body.password || '');
-  if (!name || !universityNames.has(university) || !/^\S+@\S+\.\S+$/.test(email) || password.length < 10) return fail(res, 400, 'Ad, listeden geçerli bir üniversite, e-posta ve en az 10 karakterlik şifre gerekli.');
-  if (!dev && !mailer) return fail(res, 503, 'E-posta gönderim servisi yapılandırılmadı.');
-  if (db.prepare('SELECT id FROM users WHERE email=?').get(email)) return fail(res, 409, 'Bu e-posta zaten kayıtlı.');
-  const result = db.prepare('INSERT INTO users(name,email,password_hash,university,campus,role,student_status) VALUES(?,?,?,?,?,?,?)').run(name, email, await passwordHash(password), university, '', 'student', 'pending');
+  const validation=validateRegistration(req.body, [...universityNames]);
+  if(Object.keys(validation.fields).length)return res.status(400).json({error:'Lütfen işaretli alanları kontrol et.',fields:validation.fields});
+  const {name,email,university,password,phone}=validation.values;
+  if (!dev && !mailer) return fail(res,503,'Kayıt şu anda açılamıyor. Lütfen daha sonra tekrar dene.');
+  if (db.prepare('SELECT id FROM users WHERE email=?').get(email)) return res.status(409).json({error:'Bu e-posta zaten kayıtlı. Giriş yapabilir veya başka bir e-posta kullanabilirsin.',fields:{email:'Bu e-posta zaten kayıtlı.'}});
+  const result = db.prepare('INSERT INTO users(name,email,password_hash,university,campus,role,student_status,phone) VALUES(?,?,?,?,?,?,?,?)').run(name, email, await passwordHash(password), university, '', 'student', 'pending',phone);
   const user = db.prepare('SELECT * FROM users WHERE id=?').get(result.lastInsertRowid);
   if (!mailer && !testEmailCodes) {
     setSession(res, user.id, req.body.rememberMe === true);
@@ -382,10 +395,10 @@ app.get('/api/listings/:id', (req, res) => {
   const row = db.prepare(`${listingSelect} WHERE l.id=?`).get(req.params.id);
   if (!row) return fail(res, 404, 'İlan bulunamadı.');
   const me = currentUser(req);
-  if (row.seller_closed) return fail(res,404,'İlan bulunamadı.');
-  if (['expired','removed'].includes(row.status) && me?.id !== row.seller_id) return fail(res,404,'İlan bulunamadı.');
-  if (row.kind === 'donation' && !me?.support_verified && me?.id !== row.seller_id) return fail(res,404,'İlan bulunamadı.');
-  if (row.kind === 'donation' && me && row.university !== me.university && row.seller_id !== me.id) return fail(res,404,'İlan bulunamadı.');
+  if (row.seller_closed && me?.role !== 'admin') return fail(res,404,'İlan bulunamadı.');
+  if (['expired','removed'].includes(row.status) && me?.id !== row.seller_id && me?.role !== 'admin') return fail(res,404,'İlan bulunamadı.');
+  if (row.kind === 'donation' && !me?.support_verified && me?.id !== row.seller_id && me?.role !== 'admin') return fail(res,404,'İlan bulunamadı.');
+  if (row.kind === 'donation' && me && row.university !== me.university && row.seller_id !== me.id && me.role !== 'admin') return fail(res,404,'İlan bulunamadı.');
   const images = db.prepare('SELECT filename,position FROM listing_images WHERE listing_id=? ORDER BY position').all(row.id);
   const favorite = me ? !!db.prepare('SELECT 1 FROM favorites WHERE user_id=? AND listing_id=?').get(me.id,row.id) : false;
   res.json({ listing: { ...row, images, favorite } });
@@ -419,7 +432,7 @@ app.post('/api/listings', upload.array('photos',6), (req, res) => {
 app.patch('/api/listings/:id', upload.array('photos',6), (req, res) => {
   const user = requireUser(req,res); if (!user) return;
   const listing = db.prepare('SELECT * FROM listings WHERE id=?').get(req.params.id);
-  if (!listing || listing.seller_id !== user.id) return fail(res,404,'İlan bulunamadı.');
+  if (!listing || (listing.seller_id !== user.id && user.role !== 'admin')) return fail(res,404,'İlan bulunamadı.');
   const status = clean(req.body.status,20);
   if (listing.status === 'expired' && status && status !== 'removed') return fail(res,409,'Süresi dolan ilan yeniden yayına alınamaz. Yeni bir ilan oluştur.');
   if (status && !['active','reserved','sold','removed'].includes(status)) return fail(res,400,'Geçersiz durum.');
@@ -481,12 +494,12 @@ app.post('/api/listings/:id/conversation', (req, res) => {
 });
 app.get('/api/conversations', (req, res) => {
   const user = requireUser(req,res); if (!user) return;
-  const rows = db.prepare(`SELECT c.id,c.listing_id,l.title,l.status,u.id AS other_id,u.name AS other_name,u.university AS other_university,
+  const rows = db.prepare(`SELECT c.id,c.listing_id,COALESCE(l.title,'Yönetim mesajı') AS title,l.status,u.id AS other_id,u.name AS other_name,u.university AS other_university,
     (SELECT CASE WHEN m.voice_filename IS NOT NULL THEN CASE WHEN m.body='' THEN '🎤 Sesli mesaj' ELSE '🎤 ' || m.body END WHEN m.photo_filename IS NOT NULL THEN CASE WHEN m.body='' THEN '📷 Fotoğraf' ELSE '📷 ' || m.body END ELSE m.body END FROM messages m WHERE m.conversation_id=c.id ORDER BY id DESC LIMIT 1) AS last_message,
     (SELECT created_at FROM messages m WHERE m.conversation_id=c.id ORDER BY id DESC LIMIT 1) AS last_at,
     (SELECT COUNT(*) FROM messages m WHERE m.conversation_id=c.id AND m.sender_id<>? AND m.read_at IS NULL) AS unread_count
-    FROM conversations c JOIN listings l ON l.id=c.listing_id JOIN users u ON u.id=CASE WHEN c.buyer_id=? THEN c.seller_id ELSE c.buyer_id END
-     WHERE (c.buyer_id=? OR c.seller_id=?) AND (l.kind='sale' OR ?=1 OR l.seller_id=?) ORDER BY COALESCE(last_at,c.created_at) DESC`).all(user.id,user.id,user.id,user.id,user.support_verified,user.id);
+    FROM conversations c LEFT JOIN listings l ON l.id=c.listing_id JOIN users u ON u.id=CASE WHEN c.buyer_id=? THEN c.seller_id ELSE c.buyer_id END
+     WHERE (c.buyer_id=? OR c.seller_id=?) AND (c.listing_id IS NULL OR l.kind='sale' OR ?=1 OR l.seller_id=?) ORDER BY COALESCE(last_at,c.created_at) DESC`).all(user.id,user.id,user.id,user.id,user.support_verified,user.id);
   res.json({ conversations:rows });
 });
 app.get('/api/message-events', (req,res) => {
@@ -504,17 +517,18 @@ app.get('/api/message-events', (req,res) => {
 app.get('/api/unread-count', (req, res) => {
   const user = requireUser(req,res); if (!user) return;
   const count = db.prepare(`SELECT COUNT(*) AS count FROM messages m
-    JOIN conversations c ON c.id=m.conversation_id JOIN listings l ON l.id=c.listing_id
+    JOIN conversations c ON c.id=m.conversation_id LEFT JOIN listings l ON l.id=c.listing_id
     WHERE (c.buyer_id=? OR c.seller_id=?) AND m.sender_id<>? AND m.read_at IS NULL
-    AND (l.kind='sale' OR ?=1 OR l.seller_id=?)`).get(user.id,user.id,user.id,user.support_verified,user.id).count;
+    AND (c.listing_id IS NULL OR l.kind='sale' OR ?=1 OR l.seller_id=?)`).get(user.id,user.id,user.id,user.support_verified,user.id).count;
   res.json({ count });
 });
 app.get('/api/conversations/:id/messages', (req, res) => {
   const user = requireUser(req,res); if (!user) return;
   const conversation = db.prepare('SELECT * FROM conversations WHERE id=?').get(req.params.id);
   if (!conversation || ![conversation.buyer_id,conversation.seller_id].includes(user.id)) return fail(res,404,'Konuşma bulunamadı.');
-  db.prepare('UPDATE messages SET read_at=? WHERE conversation_id=? AND sender_id<>? AND read_at IS NULL').run(Date.now(),conversation.id,user.id);
-  res.json({ messages:db.prepare('SELECT id,sender_id,body,created_at,photo_filename,voice_filename FROM messages WHERE conversation_id=? ORDER BY id ASC LIMIT 200').all(conversation.id) });
+  const readResult=db.prepare('UPDATE messages SET read_at=? WHERE conversation_id=? AND sender_id<>? AND read_at IS NULL').run(Date.now(),conversation.id,user.id);
+  if(readResult.changes)notifyConversation(conversation,user.id);
+  res.json({ messages:db.prepare('SELECT id,sender_id,body,created_at,photo_filename,voice_filename,read_at FROM messages WHERE conversation_id=? ORDER BY id ASC LIMIT 200').all(conversation.id) });
 });
 app.post('/api/conversations/:id/messages', upload.fields([{name:'photo',maxCount:1},{name:'voice',maxCount:1}]), (req, res) => {
   const user = requireUser(req,res); if (!user) return;
@@ -538,6 +552,21 @@ app.post('/api/conversations/:id/messages', upload.fields([{name:'photo',maxCoun
   catch(error){if(filename)fs.rmSync(path.join(messageUploadDir,filename),{force:true});if(voiceFilename)fs.rmSync(path.join(voiceUploadDir,voiceFilename),{force:true});throw error;}
   notifyConversation(conversation,user.id);
   res.status(201).json({ ok:true,id:Number(messageId) });
+});
+app.patch('/api/messages/:id', (req,res)=>{
+ const user=requireUser(req,res);if(!user)return;
+ const message=db.prepare('SELECT * FROM messages WHERE id=? AND sender_id=?').get(req.params.id,user.id);
+ if(!message)return fail(res,404,'Mesaj bulunamadı.');
+ const body=clean(req.body?.body,2000);if(!body)return fail(res,400,'Mesaj boş olamaz.');
+ db.prepare('UPDATE messages SET body=? WHERE id=?').run(body,message.id);
+ const conversation=db.prepare('SELECT * FROM conversations WHERE id=?').get(message.conversation_id);notifyConversation(conversation,user.id);res.json({ok:true});
+});
+app.delete('/api/messages/:id', (req,res)=>{
+ const user=requireUser(req,res);if(!user)return;
+ const message=db.prepare('SELECT * FROM messages WHERE id=? AND sender_id=?').get(req.params.id,user.id);
+ if(!message)return fail(res,404,'Mesaj bulunamadı.');
+ db.prepare("UPDATE messages SET body='Bu mesaj silindi.',photo_filename=NULL,voice_filename=NULL WHERE id=?").run(message.id);
+ const conversation=db.prepare('SELECT * FROM conversations WHERE id=?').get(message.conversation_id);notifyConversation(conversation,user.id);res.json({ok:true});
 });
 app.get('/api/messages/:id/photo', (req,res) => {
   const user=requireUser(req,res);if(!user)return;
@@ -679,6 +708,19 @@ app.get('/api/messages/:id/voice', (req,res) => {
   res.type(type);
   res.sendFile(path.join(voiceUploadDir,audio.voice_filename));
 });
+app.post('/api/admin/accounts/:id/message', (req,res)=>{
+  const admin=requireAdmin(req,res);if(!admin)return;
+  const account=db.prepare('SELECT id,closed_at FROM users WHERE id=?').get(req.params.id);
+  if(!account || account.closed_at || account.id===admin.id)return fail(res,400,'Bu hesaba mesaj gönderilemez.');
+  let conversation=db.prepare('SELECT * FROM conversations WHERE listing_id IS NULL AND buyer_id=? AND seller_id=?').get(account.id,admin.id);
+  if(!conversation){const result=db.prepare('INSERT INTO conversations(listing_id,buyer_id,seller_id) VALUES(NULL,?,?)').run(account.id,admin.id);conversation=db.prepare('SELECT * FROM conversations WHERE id=?').get(result.lastInsertRowid);}
+  res.json({conversationId:conversation.id});
+});
+app.get('/api/admin/accounts/:id/listings',(req,res)=>{
+  if(!requireAdmin(req,res))return;
+  const listings=db.prepare('SELECT id,title,price,kind,status FROM listings WHERE seller_id=? ORDER BY id DESC').all(req.params.id);
+  res.json({listings});
+});
 app.get('/api/admin/accounts', (req, res) => {
   if (!requireAdmin(req,res)) return;
   const accounts = db.prepare(`SELECT u.id,u.name,u.email,u.phone,u.university,u.role,u.email_verified,u.created_at,u.closed_at,
@@ -691,11 +733,11 @@ app.get('/api/admin/accounts/:id/conversations', (req,res) => {
   if(!requireAdmin(req,res))return;
   const account=db.prepare('SELECT id,name FROM users WHERE id=?').get(req.params.id);
   if(!account)return fail(res,404,'Hesap bulunamadı.');
-  const conversations=db.prepare(`SELECT c.id,c.listing_id,l.title,
+  const conversations=db.prepare(`SELECT c.id,c.listing_id,COALESCE(l.title,'Yönetim mesajı') AS title,
     CASE WHEN c.buyer_id=? THEN seller.name ELSE buyer.name END AS other_name,
     (SELECT MAX(m.created_at) FROM messages m WHERE m.conversation_id=c.id) AS last_at,
     (SELECT COUNT(*) FROM messages m WHERE m.conversation_id=c.id) AS message_count
-    FROM conversations c JOIN listings l ON l.id=c.listing_id
+    FROM conversations c LEFT JOIN listings l ON l.id=c.listing_id
     JOIN users buyer ON buyer.id=c.buyer_id JOIN users seller ON seller.id=c.seller_id
     WHERE c.buyer_id=? OR c.seller_id=? ORDER BY last_at DESC,c.id DESC`).all(account.id,account.id,account.id);
   res.json({account,conversations});
@@ -781,4 +823,4 @@ app.use((err, req, res, next) => {
   if (err instanceof multer.MulterError) return fail(res,400,'Dosya sınırı aşıldı (en çok 6 fotoğraf; dosya başına 5 MB).');
   return fail(res,500,'Beklenmeyen bir hata oluştu.');
 });
-app.listen(port, () => console.log(`UniPazar hazır: http://localhost:${port}`));
+app.listen(port, localMode?'127.0.0.1':undefined, () => console.log(`Üni Satış hazır: http://localhost:${port}`));

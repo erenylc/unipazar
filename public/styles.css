@@ -31,3 +31,34 @@ html[data-theme="dark"] .messages-intro h2,html[data-theme="dark"] .messages-int
 .chat-person-link,.chat-person-link:hover,.chat-header small a,.chat-header small a:hover{text-decoration:none!important}
 .theme-toggle{display:grid;place-items:center;width:40px;height:40px;border:1px solid #e3dff0;border-radius:12px;background:linear-gradient(145deg,#fff,#f0ebfb);box-shadow:0 2px 8px #39336714;transition:transform .18s,box-shadow .18s}.theme-toggle:hover{transform:translateY(-2px);box-shadow:0 5px 14px #39336728;background:#eae3fa}.theme-toggle svg{width:23px;height:23px;fill:none;stroke:#514888;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}html[data-theme="dark"] .theme-toggle{background:linear-gradient(145deg,#393352,#27283e);border-color:#62587c}html[data-theme="dark"] .theme-toggle svg{stroke:#f5d589}
 .edit-listing-modal{width:min(100%,680px)}.edit-photo-list{display:flex;gap:8px;overflow-x:auto;min-height:112px}.edit-photo{width:105px;height:105px;position:relative;flex:none;border-radius:10px;overflow:hidden;border:1px solid #dedee9;background:#eee}.edit-photo img{width:100%;height:100%;object-fit:cover}.edit-photo span{position:absolute;left:4px;bottom:4px;right:4px;padding:3px;border-radius:5px;background:#1c213bba;color:#fff;font-size:10px;text-align:center}.edit-photo button{position:absolute;right:4px;top:4px;width:25px;height:25px;border:0;border-radius:50%;background:#fff;color:#a03043;font-size:19px;line-height:1}.edit-photo-picker{margin-top:8px}.edit-photo-picker input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+
+/* Theme surfaces remain readable across pages and dialogs. */
+html[data-theme="dark"] .donation-banner,html[data-theme="dark"] .giving-panel,html[data-theme="dark"] .donation-process .steps>div{background:#302c46;border-color:#514865;color:#f5f3ff}
+html[data-theme="dark"] .donation-banner h2,html[data-theme="dark"] .giving-panel h3,html[data-theme="dark"] .page-intro h2{color:#f5f3ff}
+html[data-theme="dark"] .donation-banner p,html[data-theme="dark"] .giving-panel p,html[data-theme="dark"] .field label,html[data-theme="dark"] .hint,html[data-theme="dark"] .small,html[data-theme="dark"] .footer{color:#cbc8df}
+html[data-theme="dark"] .page-intro{background:linear-gradient(110deg,#302c46,#252638)}
+html[data-theme="dark"] .btn-light,html[data-theme="dark"] .status,html[data-theme="dark"] .badge,html[data-theme="dark"] .campus-picker{background:#3c3854;color:#f1ecff;border-color:#625978}
+html[data-theme="dark"] input::placeholder,html[data-theme="dark"] textarea::placeholder{color:#bab6ce}
+html[data-theme="dark"] .choice-card p,html[data-theme="dark"] .choice-card h3,html[data-theme="dark"] .close{color:#e2ddf3}
+html[data-theme="dark"] .messages-intro h2,html[data-theme="dark"] .messages-intro p,html[data-theme="dark"] .messages-eyebrow{color:#29263e}
+::view-transition-old(root){animation:theme-fade-out .32s ease both}
+::view-transition-new(root){animation:theme-fade-in .4s ease both}
+@keyframes theme-fade-out{to{opacity:0;filter:blur(2px)}}
+@keyframes theme-fade-in{from{opacity:0;filter:blur(2px)}to{opacity:1;filter:blur(0)}}
+@media(prefers-reduced-motion:reduce){::view-transition-old(root),::view-transition-new(root){animation:none}}
+html[data-theme="dark"] .campus-label,html[data-theme="dark"] .card-detail,html[data-theme="dark"] .chat-header small,html[data-theme="dark"] .chat-preview small,html[data-theme="dark"] .chat-last,html[data-theme="dark"] .field label,html[data-theme="dark"] .remember{color:#cbc8df}
+html[data-theme="dark"] .icon-btn{background:#302c46;color:#f1ecff;border-color:#625978}
+
+html{scrollbar-gutter:stable}body,.topbar,.panel,.card,.donation-banner{transition:background-color .25s,color .25s,border-color .25s}
+.voice-bars{display:flex;align-items:center;gap:3px;height:28px}.voice-bars i{display:block;width:4px;height:3px;background:#e12b4b;border-radius:3px}
+.bubble{position:relative}.message-ticks{color:#cbd7d4}.message-ticks.read{color:#60c7ff}.message-menu{position:absolute;right:2px;top:-12px}.message-menu summary{cursor:pointer;list-style:none;border-radius:8px;background:#e7e5f3;color:#413b72;padding:0 6px}.message-menu>div{position:absolute;right:0;z-index:3;display:grid;background:#fff;color:#25243c;box-shadow:0 4px 20px #0003;border-radius:12px;padding:5px}.message-menu button{border:0;background:transparent;color:inherit;padding:8px 18px;cursor:pointer}
+.category-menu{position:relative;min-width:190px}.category-menu summary{list-style:none;cursor:pointer;border:1px solid #dedfd8;border-radius:16px;padding:12px 16px;background:#fff;display:flex;justify-content:space-between;gap:12px}.category-options{position:absolute;right:0;top:calc(100% + 8px);z-index:5;background:#fff;border:1px solid #dedfd8;box-shadow:0 10px 30px #0002;border-radius:18px;padding:8px;min-width:220px;display:grid;gap:4px}.category-options button{border:0;border-radius:12px;text-align:left;padding:12px;background:transparent;color:inherit;cursor:pointer}.category-options button:hover,.category-options button[aria-pressed=true]{background:#eee9f8;color:#454078}.card{border-radius:20px;overflow:hidden}html[data-theme=dark] .category-menu summary,html[data-theme=dark] .category-options{background:#292b3e;border-color:#4a4961;color:#f1efff}
+
+@media(max-width:700px){.voice-bars{display:flex}.category-menu{min-width:150px}.category-options{max-width:90vw}}
+
+.message-ticks{float:left;margin-right:10px}.category-menu summary::-webkit-details-marker{display:none}
+.category-options{max-height:min(340px,45vh);overflow-y:auto}
+
+.field-error{display:block;margin-top:6px;font-size:13px;line-height:1.4;color:#b62743}.field-error[hidden],.registration-alert[hidden]{display:none}.field input[aria-invalid=true]{border-color:#c43150;box-shadow:0 0 0 2px #c4315012}.registration-alert{padding:12px 14px;margin:0 0 16px;border-radius:12px;background:#fff0f2;border:1px solid #edb7c2;color:#9d2039;font-size:14px}html[data-theme=dark] .field-error{color:#ff9eb0}html[data-theme=dark] .registration-alert{background:#442b39;border-color:#915069;color:#ffd2dc}.modal:has([data-form=register]){max-height:calc(100dvh - 32px);overflow-y:auto}
+
+.field select[aria-invalid=true]{border-color:#c43150;box-shadow:0 0 0 2px #c4315012}.registration-alert button{border:0;background:transparent;text-decoration:underline;color:inherit;cursor:pointer}.field select:disabled{opacity:.65}

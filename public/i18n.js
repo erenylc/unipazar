@@ -138,7 +138,7 @@ export function translateText(raw,language){
 }
 export function applyLocale(root,language){
  document.documentElement.lang=language;
- document.title=`UniPazar — ${translateText('Üniversitenin pazarı',language)}`;
+ document.title=`Üni Satış — ${translateText('Üniversitenin pazarı',language)}`;
  if(language==='tr')return;
  const index=codes.indexOf(language);if(index<0)return;
  const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);let node;

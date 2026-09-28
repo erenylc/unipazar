@@ -1,4 +1,4 @@
-# UniPazar
+# Üni Satış
 
 Üniversite öğrencileri için mobil öncelikli ikinci el pazar ve Dayanışma uygulamasının ilk çalışan sürümü.
 

@@ -7,7 +7,7 @@
     "node": ">=24 <25"
   },
   "scripts": {
-    "dev": "node --watch server.js",
+    "dev": "node --watch server.js --local",
     "start": "node server.js",
     "admin:grant": "node scripts/grant-admin.js",
     "check": "node --check server.js && node --check public/app.js && node --check public/i18n.js && node --check public/i18n-extra.js",

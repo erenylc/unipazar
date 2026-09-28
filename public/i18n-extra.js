@@ -1,7 +1,20 @@
 // Static interface copy. User-written listings, names and messages are not translated.
 export const extraRows={
-'UNİPAZAR · ÖZEL SOHBETLER':['UNIPAZAR · PRIVATE CHATS','UNIPAZAR · CHATS PRIVADOS','UNIPAZAR · ЖЕКЕ ЧАТТАР','UNIPAZAR · PRIVATE CHATS','UNIPAZAR · CONVERSATIONS PRIVÉES'],
-'UNİPAZAR · ÖĞRENCİ PAZARI VE DAYANIŞMA':['UNIPAZAR · STUDENT MARKETPLACE','UNIPAZAR · MERCADO ESTUDIANTIL','UNIPAZAR · СТУДЕНТТЕР НАРЫҒЫ','UNIPAZAR · STUDIERENDENMARKT','UNIPAZAR · MARCHÉ ÉTUDIANT'],
+"Lütfen işaretli alanları kontrol et.":["Please check the highlighted fields.", "Revisa los campos marcados.", "Белгіленген өрістерді тексеріңіз.", "Bitte prüfe die markierten Felder.", "Vérifie les champs signalés."],
+"Adını ve soyadını gir.":["Enter your full name.", "Introduce tu nombre completo.", "Аты-жөніңізді енгізіңіз.", "Gib deinen vollständigen Namen ein.", "Saisis ton nom complet."],
+"Üniversiteni seç.":["Select your university.", "Selecciona tu universidad.", "Университетіңізді таңдаңыз.", "Wähle deine Universität.", "Choisis ton université."],
+"Listede bulunan bir üniversiteyi seç.":["Select a university from the list.", "Selecciona una universidad de la lista.", "Тізімдегі университетті таңдаңыз.", "Wähle eine Universität aus der Liste.", "Choisis une université dans la liste."],
+"E-posta adresini gir.":["Enter your email address.", "Introduce tu correo electrónico.", "Электрондық поштаңызды енгізіңіз.", "Gib deine E-Mail-Adresse ein.", "Saisis ton adresse e-mail."],
+"Geçerli bir e-posta adresi gir (ornek@eposta.com).":["Enter a valid email address (name@example.com).", "Introduce un correo válido (nombre@ejemplo.com).", "Жарамды электрондық пошта енгізіңіз (name@example.com).", "Gib eine gültige E-Mail-Adresse ein (name@beispiel.de).", "Saisis une adresse e-mail valide (nom@exemple.fr)."],
+"Cep telefonu numaranı gir.":["Enter your mobile number.", "Introduce tu número de móvil.", "Ұялы телефон нөміріңізді енгізіңіз.", "Gib deine Mobilnummer ein.", "Saisis ton numéro de mobile."],
+"Geçerli bir cep telefonu numarası gir (05xx xxx xx xx).":["Enter a valid Turkish mobile number (05xx xxx xx xx).", "Introduce un móvil turco válido (05xx xxx xx xx).", "Түркияның жарамды ұялы нөмірін енгізіңіз (05xx xxx xx xx).", "Gib eine gültige türkische Mobilnummer ein (05xx xxx xx xx).", "Saisis un numéro de mobile turc valide (05xx xxx xx xx)."],
+"Şifreni gir.":["Enter your password.", "Introduce tu contraseña.", "Құпиясөзіңізді енгізіңіз.", "Gib dein Passwort ein.", "Saisis ton mot de passe."],
+"Şifren en az 10 karakter olmalı.":["Your password must have at least 10 characters.", "La contraseña debe tener al menos 10 caracteres.", "Құпиясөз кемінде 10 таңбадан тұруы керек.", "Dein Passwort muss mindestens 10 Zeichen enthalten.", "Ton mot de passe doit contenir au moins 10 caractères."],
+"Bu e-posta zaten kayıtlı.":["This email is already registered.", "Este correo ya está registrado.", "Бұл электрондық пошта тіркелген.", "Diese E-Mail-Adresse ist bereits registriert.", "Cette adresse e-mail est déjà enregistrée."],
+"Bu e-posta zaten kayıtlı. Giriş yapabilir veya başka bir e-posta kullanabilirsin.":["This email is already registered. Sign in or use another email.", "Este correo ya está registrado. Inicia sesión o usa otro correo.", "Бұл электрондық пошта тіркелген. Кіріңіз немесе басқа пошта қолданыңыз.", "Diese E-Mail-Adresse ist bereits registriert. Melde dich an oder nutze eine andere.", "Cette adresse est déjà enregistrée. Connecte-toi ou utilise une autre adresse."],
+
+'ÜNİ SATIŞ · ÖZEL SOHBETLER':['ÜNİ SATIŞ · PRIVATE CHATS','ÜNİ SATIŞ · CHATS PRIVADOS','ÜNİ SATIŞ · ЖЕКЕ ЧАТТАР','ÜNİ SATIŞ · PRIVATE CHATS','ÜNİ SATIŞ · CONVERSATIONS PRIVÉES'],
+'ÜNİ SATIŞ · ÖĞRENCİ PAZARI VE DAYANIŞMA':['ÜNİ SATIŞ · STUDENT MARKETPLACE','ÜNİ SATIŞ · MERCADO ESTUDIANTIL','ÜNİ SATIŞ · СТУДЕНТТЕР НАРЫҒЫ','ÜNİ SATIŞ · STUDIERENDENMARKT','ÜNİ SATIŞ · MARCHÉ ÉTUDIANT'],
 'Eşyalar el değiştirir,':['Things change hands,','Las cosas cambian de manos,','Заттар қол ауыстырады,','Dinge wechseln den Besitzer,','Les objets changent de mains,'],
 'iyilik büyür.':['kindness grows.','la bondad crece.','жақсылық көбейеді.','Freundlichkeit wächst.','la solidarité grandit.'],
 'Güvenli buluşmalar için kalabalık ve bilinen noktaları tercih et.':['Meet in busy, familiar places.','Queda en lugares concurridos y conocidos.','Көпшілік жүретін таныс жерде кездесіңіз.','Trefft euch an belebten, bekannten Orten.','Retrouvez-vous dans un lieu fréquenté et connu.'],
@@ -160,10 +173,10 @@ export const extraRows={
 'Satıldı':['Sold','Vendido','Сатылды','Verkauft','Vendu'],
 'Ses kaydı 5 MB sınırını aştı.':['Recording exceeds 5 MB.','La grabación supera 5 MB.','Жазба 5 МБ-тан асты.','Die Aufnahme überschreitet 5 MB.','L’enregistrement dépasse 5 Mo.'],
 'Sonuç bulunamadı':['No results found','No se encontraron resultados','Нәтиже табылмады','Keine Ergebnisse','Aucun résultat'],
-'Tekrar hoş geldin':['Welcome back','Bienvenido de nuevo','Қайта қош келдіңіз','Willkommen zurück','Bon retour'],
+'Hesabınızı giriniz':['Enter your account details','Introduce los datos de tu cuenta','Тіркелгі деректеріңізді енгізіңіз','Geben Sie Ihre Kontodaten ein','Saisissez les informations de votre compte'],
 'Telefon numaramı değiştir':['Change my phone number','Cambiar mi teléfono','Телефон нөмірімді өзгерту','Telefonnummer ändern','Changer mon numéro'],
 'Telefon numarası ekle':['Add phone number','Añadir teléfono','Телефон нөмірін қосу','Telefonnummer hinzufügen','Ajouter un numéro'],
-'UniPazar’a katıl':['Join UniPazar','Únete a UniPazar','UniPazar-ға қосылыңыз','Bei UniPazar mitmachen','Rejoindre UniPazar'],
+'Üni Satış’a katıl':['Join Üni Satış','Únete a Üni Satış','Üni Satış-ға қосылыңыз','Bei Üni Satış mitmachen','Rejoindre Üni Satış'],
 '· Yönetici':['· Administrator','· Administrador','· Әкімші','· Verwaltung','· Administrateur'],
 'Ücretsiz ürün':['Free item','Artículo gratuito','Тегін зат','Gratisartikel','Article gratuit'],
 'Ücretsiz ürün paylaş':['Share a free item','Compartir artículo gratuito','Тегін затты бөлісу','Gratisartikel anbieten','Partager un article gratuit'],
@@ -178,7 +191,7 @@ export const extraRows={
 ,'Üniversitenin pazarı':['Your campus marketplace','Tu mercado universitario','Университет нарығы','Dein Campusmarkt','Votre marché universitaire']
 ,'İlanları görmek için üniversite seç':['Choose a university to view listings','Elige una universidad para ver anuncios','Хабарландыруларды көру үшін университет таңдаңыз','Wähle eine Universität, um Anzeigen zu sehen','Choisissez une université pour voir les annonces']
 ,'Favorilere ekle':['Add to favorites','Añadir a favoritos','Таңдаулыларға қосу','Zu Favoriten hinzufügen','Ajouter aux favoris']
-,'UNİPAZAR':['UNIPAZAR','UNIPAZAR','UNIPAZAR','UNIPAZAR','UNIPAZAR']
+,'ÜNİ SATIŞ':['ÜNİ SATIŞ','ÜNİ SATIŞ','ÜNİ SATIŞ','ÜNİ SATIŞ','ÜNİ SATIŞ']
 ,'İlanın kendi üniversitendeki öğrencilere gösterilir.':['Your listing is shown to students at your university.','Tu anuncio se muestra a estudiantes de tu universidad.','Хабарландыруыңыз өз университетіңіздің студенттеріне көрсетіледі.','Deine Anzeige wird Studierenden deiner Universität gezeigt.','Votre annonce est présentée aux étudiants de votre université.']
 ,'İlanın kendi üniversitendeki öğrencilere gösterilir. Paylaştığın bir eşya, başka bir öğrencinin hayatını kolaylaştırabilir.':['Your listing is shown to students at your university. An item you share can help another student.','Tu anuncio se muestra a estudiantes de tu universidad. Compartir un artículo puede ayudar a otro estudiante.','Хабарландыруыңыз өз университетіңіздің студенттеріне көрсетіледі. Бөліскен затыңыз басқа студентке көмектесе алады.','Deine Anzeige wird Studierenden deiner Universität gezeigt. Ein geteilter Gegenstand kann einem anderen Studierenden helfen.','Votre annonce est présentée aux étudiants de votre université. Un objet partagé peut aider un autre étudiant.']
 ,'Önceki fotoğraf':['Previous photo','Foto anterior','Алдыңғы фото','Vorheriges Foto','Photo précédente']
