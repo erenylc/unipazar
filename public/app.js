@@ -17,11 +17,30 @@ let theme=localStorage.getItem('unipazar-theme')==='dark'?'dark':'light';documen
  const categories = ['Ders kitapları','Elektronik','Ev & yurt','Giyim','Bisiklet & spor','Diğer'];
 const icon = { home:'⌂', heart:'♡', plus:'＋', chat:'▤', user:'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M4.5 20c.4-4.2 3-6.3 7.5-6.3s7.1 2.1 7.5 6.3"/></svg>' };
 let toastTimer;
+const responseCache=new Map();
+let cacheGeneration=0;
+function cacheLifetime(url){
+ if(url.startsWith('/api/listings?'))return 30000;
+ if(/^\/api\/listings\/\d+$/.test(url))return 30000;
+ return 0;
+}
 let voiceAudioContext=null, voiceAnalyser=null, voiceAnimation=null, voiceStarted=0;
 let chatPhoto=null, cameraStream=null, voiceClip=null, voicePreviewUrl=null, voiceRecorder=null, voiceStream=null, voiceTimer=null, voiceSeconds=0, discardVoice=false, selectedListingPhotos=[], keptEditPhotos=[], newEditPhotos=[];
 const themeIcon=()=>theme==='dark'?'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42"/></svg>':'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.2 15.9A8.7 8.7 0 0 1 8.1 3.8 8.8 8.8 0 1 0 20.2 15.9Z"/><path d="M17.4 3.2v3.4m-1.7-1.7h3.4M21 8.1v2m-1-1h2"/></svg>';
 function toast(message){ const el=$('#toast'); el.textContent=translateText(message,language); el.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>el.classList.remove('show'),4000); }
 async function api(url, options={}){
+  const method=options.method||'GET',lifetime=method==='GET'?cacheLifetime(url):0;
+  if(method!=='GET'){responseCache.clear();cacheGeneration++;}
+  const cached=lifetime?responseCache.get(url):null;
+  if(cached && cached.expires>Date.now())return cached.value||cached.promise;
+  const generation=cacheGeneration;
+  const request=performApi(url,options);
+  if(!lifetime)return request;
+  responseCache.set(url,{promise:request,expires:Date.now()+lifetime});
+  try{const value=await request;if(generation===cacheGeneration)responseCache.set(url,{value,expires:Date.now()+lifetime});return value;}
+  catch(error){if(generation===cacheGeneration)responseCache.delete(url);throw error;}
+}
+async function performApi(url, options={}){
   const config={...options,headers:{...(options.headers||{})}};
   if (options.body && !(options.body instanceof FormData)) { config.headers['Content-Type']='application/json'; config.body=JSON.stringify(options.body); }
   const res=await fetch(url,config);
@@ -530,7 +549,16 @@ document.addEventListener('submit',async event=>{
 let searchTimer; document.addEventListener('input',event=>{if(event.target.id==='adminAccountSearch'){const query=event.target.value.toLocaleLowerCase('tr-TR');document.querySelectorAll('[data-admin-account]').forEach(row=>{row.hidden=!row.textContent.toLocaleLowerCase('tr-TR').includes(query)});return;}if(event.target.id==='universityPickerSearch'){const q=event.target.value.toLocaleLowerCase('tr-TR');document.querySelectorAll('.university-option').forEach(option=>{option.hidden=!option.textContent.toLocaleLowerCase('tr-TR').includes(q)});return;}if(event.target.name==='price')event.target.value=event.target.value.replace(/[^0-9]/g,'');if(event.target.id==='searchInput'){clearTimeout(searchTimer);const query=event.target.value;state.filters.q=query;$('.grid')?.setAttribute('aria-busy','true');searchTimer=setTimeout(()=>refreshSearchResults(query),250);} const form=event.target.closest('[data-form="listing"]');if(form){const draft=Object.fromEntries([...new FormData(form).entries()].filter(([,value])=>typeof value==='string'));localStorage.setItem('unipazar-listing-draft',JSON.stringify(draft));}});
 document.addEventListener('change',event=>{if(event.target.id==='chatGalleryInput'){const file=event.target.files?.[0];if(file){if(file.size>5*1024*1024){toast('Fotoğraf en fazla 5 MB olabilir.');return;}chatPhoto=file;discardVoiceRecording();closeModal();updateChatPhotoStatus();}return;}if(event.target.id==='editPhotos'){const incoming=[...event.target.files];event.target.value='';if(keptEditPhotos.length+newEditPhotos.length+incoming.length>6){toast('En fazla 6 fotoğraf ekleyebilirsin.');return;}if(incoming.some(file=>file.size>5*1024*1024)){toast('Her fotoğraf en fazla 5 MB olabilir.');return;}newEditPhotos.push(...incoming.map(file=>({file,url:URL.createObjectURL(file)})));renderEditPhotos();return;}if(event.target.id==='photos'){const incoming=[...event.target.files];if(selectedListingPhotos.length+incoming.length>6){toast('En fazla 6 fotoğraf ekleyebilirsin.');}else if(incoming.some(file=>file.size>5*1024*1024)){toast('Her fotoğraf en fazla 5 MB olabilir.');}else selectedListingPhotos.push(...incoming);const transfer=new DataTransfer();selectedListingPhotos.forEach(file=>transfer.items.add(file));event.target.files=transfer.files;$('#photoCount').textContent=translateText(selectedListingPhotos.length?`${selectedListingPhotos.length}/6 fotoğraf seçildi`:'Henüz fotoğraf seçilmedi',language);return;}if(event.target.id==='categoryFilter'){state.filters.category=event.target.value;render();} if(event.target.id==='browseUniversity'){state.filters.university=event.target.value;render();} if(event.target.id==='kind'){const donation=event.target.value==='donation';$('#priceField').hidden=donation;$('#price').required=!donation;}});
 let previousRoute=route();
+function prefetchListing(event){
+ const link=event.target.closest?.('a[href^="#/listing/"]');
+ if(!link)return;
+ const id=link.getAttribute('href').match(/^#\/listing\/(\d+)$/)?.[1];
+ if(id)api('/api/listings/'+id).catch(()=>{});
+}
+document.addEventListener('pointerover',prefetchListing);
+document.addEventListener('focusin',prefetchListing);
+document.addEventListener('touchstart',prefetchListing,{passive:true});
 window.addEventListener('hashchange',()=>{const nextRoute=route();window.scrollTo(0,0);if(state.modal==='camera')closeModal();if(nextRoute!=='/messages')discardVoiceRecording();if(nextRoute==='/messages'&&previousRoute!=='/messages'&&!state.openConversationOnNavigation)state.selectedConversation=null;state.openConversationOnNavigation=false;previousRoute=nextRoute;render();});
 if(!location.hash)history.replaceState(null,'',location.pathname+location.search+'#/');
-refreshUser().then(async()=>{await refreshUnread();if(!state.user && accountRoutes.has(route()))history.replaceState(null,'',location.pathname+location.search+'#/');render();}).catch(error=>toast(error.message));
+refreshUser().then(()=>{refreshUnread().catch(()=>{});if(!state.user && accountRoutes.has(route()))history.replaceState(null,'',location.pathname+location.search+'#/');render();}).catch(error=>toast(error.message));
 setInterval(()=>{if(state.user && !document.hidden) refreshUnread().catch(()=>{});},15000);
