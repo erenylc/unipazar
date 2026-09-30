@@ -22,6 +22,8 @@ let cacheGeneration=0;
 function cacheLifetime(url){
  if(url.startsWith('/api/listings?'))return 30000;
  if(/^\/api\/listings\/\d+$/.test(url))return 30000;
+ if(url==='/api/mine'||url==='/api/favorites')return 30000;
+ if(url==='/api/conversations')return 5000;
  return 0;
 }
 let voiceAudioContext=null, voiceAnalyser=null, voiceAnimation=null, voiceStarted=0;
@@ -37,8 +39,8 @@ async function api(url, options={}){
   const request=performApi(url,options);
   if(!lifetime)return request;
   responseCache.set(url,{promise:request,expires:Date.now()+lifetime});
-  try{const value=await request;if(generation===cacheGeneration)responseCache.set(url,{value,expires:Date.now()+lifetime});return value;}
-  catch(error){if(generation===cacheGeneration)responseCache.delete(url);throw error;}
+  try{const value=await request;if(generation===cacheGeneration&&responseCache.get(url)?.promise===request)responseCache.set(url,{value,expires:Date.now()+lifetime});return value;}
+  catch(error){if(generation===cacheGeneration&&responseCache.get(url)?.promise===request)responseCache.delete(url);throw error;}
 }
 async function performApi(url, options={}){
   const config={...options,headers:{...(options.headers||{})}};
@@ -123,14 +125,22 @@ function restoreDraft(){
   toast('Kaydedilmiş ilan taslağın yüklendi.');
  }catch{}
 }
-async function addEditButtons(){
- const {listings}=await api('/api/mine');
+function addEditButtons(listings){
  for(const item of listings){const row=$(`a[href="#/listing/${item.id}"]`)?.closest('.list-row');row?.querySelector('.inline-actions')?.insertAdjacentHTML('afterbegin',`<button class="btn btn-outline" data-action="edit-listing" data-id="${item.id}">Düzenle</button>`);}
  applyLocale($('.list'),language);
 }
+function updateFavoriteButtons(id,favorite){
+ document.querySelectorAll(`[data-action="favorite"][data-id="${id}"]`).forEach(button=>{
+  const detail=!!button.closest('.detail-side');
+  button.textContent=detail?translateText(favorite?'♥ Favorilerden çıkar':'♡ Favorilere ekle',language):(favorite?'♥':'♡');
+  button.setAttribute('aria-label',translateText(favorite?'Favorilerden çıkar':'Favorilere ekle',language));
+ });
+ const item=state.listings.find(listing=>String(listing.id)===String(id));
+ if(item)item.favorite=favorite;
+}
 async function renderSeller(id){ const {seller,listings}=await api('/api/sellers/'+id+'/listings');if(route()!=='/seller/'+id)return;pageFrame(`<main class="shell page"><a class="back-link" href="#/"><span aria-hidden="true">←</span> İlanlara dön</a><div class="section-head"><div><h2>${escapeHtml(seller.name)} adlı öğrencinin profili</h2><p>Yayındaki ikinci el satış ilanları · ${escapeHtml(seller.university)}</p></div></div><div class="grid">${listings.length?listings.map(listingCard).join(''):empty('Aktif satış ilanı yok','Bu satıcının başka satış ilanı bulunmuyor.')}</div></main>`,'/');}
 async function renderFavorites(){ if(!state.user){showAuth();return;} const {listings}=await api('/api/favorites');if(route()!=='/favorites')return; pageFrame(`<main class="shell page"><div class="section-head"><div><h2>Favorilerim</h2><p>Kaydettiğin ilanlar burada.</p></div></div><div class="grid">${listings.length?listings.map(listingCard).join(''):empty('Henüz favorin yok','Beğendiğin ilanları kalp simgesiyle kaydet.')}</div></main>`,'/favorites'); }
-async function renderManage(){ if(!state.user){showAuth();return;} const [{listings},{offers},{requests}]=await Promise.all([api('/api/mine'),api('/api/offers'),api('/api/donation-requests')]);if(route()!=='/manage')return; pageFrame(`<main class="shell page"><div class="section-head"><div><h2>İlanlarım</h2><p>Satışlarını ve Dayanışma taleplerini buradan yönet.</p></div></div><div class="list">${listings.length?listings.map(l=>`<div class="list-row"><div><a href="#/listing/${l.id}"><strong>${escapeHtml(l.title)}</strong></a><small>${l.kind==='donation'?'Ücretsiz':money(l.price)} · ${escapeHtml(listingStatus(l.status))}</small></div><div class="inline-actions">${l.status==='active'?`<button class="btn btn-light" data-action="reserve" data-id="${l.id}">Ayır</button><button class="btn btn-outline" data-action="mark-sold" data-id="${l.id}">Tamamlandı</button>`:''}${l.status==='reserved'?`<button class="btn btn-light" data-action="reactivate" data-id="${l.id}">Yeniden aç</button><button class="btn btn-outline" data-action="mark-sold" data-id="${l.id}">Tamamlandı</button>`:''}${l.status!=='removed'?`<button class="btn btn-danger" data-action="remove" data-id="${l.id}">Kaldır</button>`:''}</div></div>`).join(''):empty('Henüz ilan vermedin','İlk ilanını vererek başlayabilirsin.')}</div>${offers.length?`<div class="section-head"><h2>Gelen teklifler</h2></div><div class="list">${offers.map(o=>`<div class="list-row"><div><strong>${escapeHtml(o.title)} · ${money(o.amount)}</strong><small>${escapeHtml(o.buyer_name)} · ${escapeHtml(o.status)}</small></div>${o.status==='pending'?`<div class="inline-actions"><button class="btn btn-primary" data-action="offer-decision" data-id="${o.id}" data-status="accepted">Kabul et</button><button class="btn btn-outline" data-action="offer-decision" data-id="${o.id}" data-status="rejected">Reddet</button></div>`:''}</div>`).join('')}</div>`:''}${requests.length?`<div class="section-head"><h2>Dayanışma talepleri</h2></div><div class="list">${requests.map(r=>`<div class="list-row"><div><strong>${escapeHtml(r.title)} · ${escapeHtml(r.requester_name)}</strong><small>${escapeHtml(r.note)} · ${escapeHtml(r.status)}</small></div>${r.status==='pending'?`<div class="inline-actions"><button class="btn btn-primary" data-action="request-decision" data-id="${r.id}" data-status="accepted">Kabul et</button><button class="btn btn-outline" data-action="request-decision" data-id="${r.id}" data-status="rejected">Reddet</button></div>`:r.status==='accepted'?`<button class="btn btn-primary" data-action="request-decision" data-id="${r.id}" data-status="completed">Teslim edildi</button>`:''}</div>`).join('')}</div>`:''}</main>`,'/mine'); }
+async function renderManage(){ if(!state.user){showAuth();return;} const [{listings},{offers},{requests}]=await Promise.all([api('/api/mine'),api('/api/offers'),api('/api/donation-requests')]);if(route()!=='/manage')return; pageFrame(`<main class="shell page"><div class="section-head"><div><h2>İlanlarım</h2><p>Satışlarını ve Dayanışma taleplerini buradan yönet.</p></div></div><div class="list">${listings.length?listings.map(l=>`<div class="list-row"><div><a href="#/listing/${l.id}"><strong>${escapeHtml(l.title)}</strong></a><small>${l.kind==='donation'?'Ücretsiz':money(l.price)} · ${escapeHtml(listingStatus(l.status))}</small></div><div class="inline-actions">${l.status==='active'?`<button class="btn btn-light" data-action="reserve" data-id="${l.id}">Ayır</button><button class="btn btn-outline" data-action="mark-sold" data-id="${l.id}">Tamamlandı</button>`:''}${l.status==='reserved'?`<button class="btn btn-light" data-action="reactivate" data-id="${l.id}">Yeniden aç</button><button class="btn btn-outline" data-action="mark-sold" data-id="${l.id}">Tamamlandı</button>`:''}${l.status!=='removed'?`<button class="btn btn-danger" data-action="remove" data-id="${l.id}">Kaldır</button>`:''}</div></div>`).join(''):empty('Henüz ilan vermedin','İlk ilanını vererek başlayabilirsin.')}</div>${offers.length?`<div class="section-head"><h2>Gelen teklifler</h2></div><div class="list">${offers.map(o=>`<div class="list-row"><div><strong>${escapeHtml(o.title)} · ${money(o.amount)}</strong><small>${escapeHtml(o.buyer_name)} · ${escapeHtml(o.status)}</small></div>${o.status==='pending'?`<div class="inline-actions"><button class="btn btn-primary" data-action="offer-decision" data-id="${o.id}" data-status="accepted">Kabul et</button><button class="btn btn-outline" data-action="offer-decision" data-id="${o.id}" data-status="rejected">Reddet</button></div>`:''}</div>`).join('')}</div>`:''}${requests.length?`<div class="section-head"><h2>Dayanışma talepleri</h2></div><div class="list">${requests.map(r=>`<div class="list-row"><div><strong>${escapeHtml(r.title)} · ${escapeHtml(r.requester_name)}</strong><small>${escapeHtml(r.note)} · ${escapeHtml(r.status)}</small></div>${r.status==='pending'?`<div class="inline-actions"><button class="btn btn-primary" data-action="request-decision" data-id="${r.id}" data-status="accepted">Kabul et</button><button class="btn btn-outline" data-action="request-decision" data-id="${r.id}" data-status="rejected">Reddet</button></div>`:r.status==='accepted'?`<button class="btn btn-primary" data-action="request-decision" data-id="${r.id}" data-status="completed">Teslim edildi</button>`:''}</div>`).join('')}</div>`:''}</main>`,'/mine'); addEditButtons(listings); }
 function ownListingCard(item){
  const free=item.kind==='donation';
  return `<article class="card"><a class="card-image" href="#/listing/${item.id}">${item.cover?`<img src="/uploads/${encodeURIComponent(item.cover)}" alt="${escapeHtml(item.title)}" loading="lazy">`:'<div class="placeholder">Fotoğraf yok</div>'}<span class="badge ${free?'free':''}">${free?'Ücretsiz':'İkinci el'}</span></a><div class="card-body"><a href="#/listing/${item.id}"><h3>${escapeHtml(item.title)}</h3></a><div class="price">${free?'Ücretsiz':money(item.price)}</div><div class="meta">${escapeHtml(item.university)} · ${escapeHtml(item.condition)} · ${item.status==='active'?'Yayında':'Ayrıldı'}</div><button class="btn btn-outline" data-action="edit-listing" data-id="${item.id}" style="margin-top:12px">Düzenle</button></div></article>`;
@@ -158,14 +168,21 @@ async function renderSupport(){
  pageFrame(`<main class="shell page narrow-page"><div class="section-head"><div><h2>Destek başvurusu</h2><p>İhtiyacı olan öğrencilerin üniversitelerindeki ücretsiz ilanlara erişmesi için.</p></div></div><section class="panel support-panel"><p>Başvurunda ihtiyacının nedenini ve aylık aile gelirini paylaş. Bu bilgiler yalnızca başvuruyu inceleyen yöneticiye gösterilir. Tam TC kimlik numaranı istemiyoruz; son 4 hane başvurunu ayırt etmek içindir ve kimlik doğrulaması sayılmaz.</p>${status?`<p class="status">${escapeHtml(status)}</p>`:''}${application?.status==='approved'?'<a class="btn btn-primary" href="#/donation">Ücretsiz ilanları gör</a>':`<form data-form="support"><div class="field"><label for="supportReason">Desteğe neden ihtiyacın var?</label><textarea id="supportReason" name="reason" minlength="30" maxlength="1000" required placeholder="Durumunu kısaca anlat">${escapeHtml(application?.reason||'')}</textarea></div><div class="field"><label for="familyIncome">Aylık aile geliri (₺)</label><input id="familyIncome" type="number" min="0" max="1000000" step="1" name="familyIncome" value="${application?.family_income??''}" required></div><div class="field"><label for="identityLast4">TC kimlik numaranın son 4 hanesi</label><input id="identityLast4" name="identityLast4" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" value="${escapeHtml(application?.identity_last4||'')}" required></div><button class="btn btn-primary">${application?'Başvuruyu güncelle':'Başvuruyu gönder'}</button></form>`}</section></main>`,'/support');
 }
 const chatTime = value => value ? new Date(value).toLocaleTimeString(({tr:'tr-TR',en:'en-GB',es:'es-ES',kk:'kk-KZ',de:'de-DE',fr:'fr-FR'})[language]||'tr-TR',{hour:'2-digit',minute:'2-digit'}) : '';
+let messagesRenderSequence=0;
 async function renderMessages(){
  if(!state.user){showAuth();return;}
- const originRoute=route();
- const {conversations:allConversations}=await api('/api/conversations');if(route()!==originRoute)return;
+ const originRoute=route(),sequence=++messagesRenderSequence,requestedConversation=state.selectedConversation;
+ const [conversationResult,requestedMessages]=await Promise.all([
+  api('/api/conversations'),
+  requestedConversation?api(`/api/conversations/${requestedConversation}/messages`):Promise.resolve(null)
+ ]);
+ if(route()!==originRoute||sequence!==messagesRenderSequence)return;
+ const allConversations=conversationResult.conversations;
  const adminChat=route().startsWith('/admin-message/');
  const conversations=allConversations.filter(c=>(!adminChat?(state.user.role!=='admin'||c.listing_id):c.id===state.selectedConversation)&&(c.last_message||c.id===state.selectedConversation));
  const selected=conversations.find(c=>c.id===state.selectedConversation)||{id:null,other_name:'',other_university:'',other_id:0,listing_id:0,title:''};
- const messages=selected.id?(await api(`/api/conversations/${selected.id}/messages`)).messages:[];if(route()!==originRoute)return;
+ const messages=selected.id?(selected.id===requestedConversation?requestedMessages:await api(`/api/conversations/${selected.id}/messages`)).messages:[];
+ if(route()!==originRoute||sequence!==messagesRenderSequence)return;
  if(selected.id)selected.unread_count=0;
  state.selectedConversation=selected.id;
  const hadFocus=!!document.activeElement?.closest('.chat-compose');
@@ -404,7 +421,7 @@ function showRouteLoading(path){
 }
 async function render(){const path=route(),sequence=++navigationSequence;
  const loadingTimer=setTimeout(()=>{if(sequence===navigationSequence&&route()===path)showRouteLoading(path);},120);
- try { const path=route(); if(!state.user && accountRoutes.has(path)){await renderBrowse();showAuth();return;} if(path==='/') await renderBrowse(); else if(path==='/donation') await renderBrowse(true); else if(path.startsWith('/listing/')) {await renderDetail(path.split('/')[2]);decorateDetail();} else if(path.startsWith('/seller/')) await renderSeller(path.split('/')[2]); else if(path==='/sell') renderSellChoice(); else if(path==='/sell-sale') {renderSell();restoreDraft();} else if(path==='/sell-donation') {renderSell('donation');restoreDraft();} else if(path==='/favorites') await renderFavorites(); else if(path.startsWith('/admin-messages/'))await renderAdminMessages(path.split('/')[2],path.split('/')[3]);else if(path.startsWith('/admin-message/')){if(state.user?.role!=='admin'){go('/');return;}state.selectedConversation=Number(path.split('/')[2]);await renderMessages();}else if(path==='/messages') await renderMessages(); else if(path==='/mine') await renderListingsDashboard(); else if(path==='/manage') {await renderManage();await addEditButtons();} else if(path==='/account'){await loadUniversities();renderAccount();} else if(path==='/support') await renderSupport(); else if(path==='/admin') await renderAdmin(); else go('/'); } catch(error){ if(sequence===navigationSequence){toast(error.message);pageFrame(`<main class="shell page">${empty('Sayfa yüklenemedi',error.message)}</main>`,'/');} } finally {clearTimeout(loadingTimer);} }
+ try { const path=route(); if(!state.user && accountRoutes.has(path)){await renderBrowse();showAuth();return;} if(path==='/') await renderBrowse(); else if(path==='/donation') await renderBrowse(true); else if(path.startsWith('/listing/')) {await renderDetail(path.split('/')[2]);decorateDetail();} else if(path.startsWith('/seller/')) await renderSeller(path.split('/')[2]); else if(path==='/sell') renderSellChoice(); else if(path==='/sell-sale') {renderSell();restoreDraft();} else if(path==='/sell-donation') {renderSell('donation');restoreDraft();} else if(path==='/favorites') await renderFavorites(); else if(path.startsWith('/admin-messages/'))await renderAdminMessages(path.split('/')[2],path.split('/')[3]);else if(path.startsWith('/admin-message/')){if(state.user?.role!=='admin'){go('/');return;}state.selectedConversation=Number(path.split('/')[2]);await renderMessages();}else if(path==='/messages') await renderMessages(); else if(path==='/mine') await renderListingsDashboard(); else if(path==='/manage') await renderManage(); else if(path==='/account'){await loadUniversities();renderAccount();} else if(path==='/support') await renderSupport(); else if(path==='/admin') await renderAdmin(); else go('/'); } catch(error){ if(sequence===navigationSequence){toast(error.message);pageFrame(`<main class="shell page">${empty('Sayfa yüklenemedi',error.message)}</main>`,'/');} } finally {clearTimeout(loadingTimer);} }
 async function refreshUser(){const result=await api('/api/me');state.user=result.user;state.emailVerificationAvailable=result.emailVerificationAvailable;connectMessageStream();}
 async function refreshUnread(){
   state.unreadCount=state.user?(await api('/api/unread-count')).count:0;
@@ -418,6 +435,7 @@ function connectMessageStream(){
  messageStream=new EventSource('/api/message-events');
  messageStream.onmessage=event=>{
   let payload;try{payload=JSON.parse(event.data)}catch{return;}
+  responseCache.delete('/api/conversations');
   if(payload.senderId===state.user?.id){refreshUnread().catch(()=>{});return;}
   clearTimeout(liveRenderTimer);
   liveRenderTimer=setTimeout(()=>{
@@ -472,7 +490,20 @@ document.addEventListener('click',async event=>{
    if(action==='change-phone') return showSimpleModal('Telefon numaramı değiştir','Numaran yalnızca hesap bilgilerinde görünür.',`<form data-form="change-phone"><div class="field"><label>Yeni telefon numarası</label><input name="phone" type="tel" placeholder="05xx xxx xx xx" required></div><div class="field"><label>Mevcut şifren</label><input name="password" type="password" autocomplete="current-password" required></div><button class="btn btn-primary">Numarayı kaydet</button></form>`);
    if(action==='logout'){await api('/api/logout',{method:'POST'});state.user=null;connectMessageStream();state.unreadCount=0;state.filters.university='';go('/');toast('Çıkış yapıldı.');return render();}
    if(!state.user){showAuth();return;}
-   if(action==='favorite'){ const isFavorite=target.textContent.includes('♥'); await api(`/api/listings/${id}/favorite`,{method:isFavorite?'DELETE':'POST'});toast(isFavorite?'Favorilerden çıkarıldı.':'Favorilere eklendi.');return render(); }
+   if(action==='favorite'){
+    const wasFavorite=target.textContent.includes('♥');
+    updateFavoriteButtons(id,!wasFavorite);target.disabled=true;
+    try{
+     await api(`/api/listings/${id}/favorite`,{method:wasFavorite?'DELETE':'POST'});
+     if(wasFavorite&&route()==='/favorites'){
+      target.closest('.card')?.remove();
+      if(!document.querySelector('.grid .card')){$('.grid').innerHTML=empty('Henüz favorin yok','Beğendiğin ilanları kalp simgesiyle kaydet.');applyLocale($('.grid'),language);}
+     }
+     toast(wasFavorite?'Favorilerden çıkarıldı.':'Favorilere eklendi.');
+    }catch(error){updateFavoriteButtons(id,wasFavorite);throw error;}
+    finally{target.disabled=false;}
+    return;
+   }
    if(action==='start-chat'){const data=await api(`/api/listings/${id}/conversation`,{method:'POST'});state.selectedConversation=data.id;state.openConversationOnNavigation=true;return go('/messages');}
    if(action==='request-donation') return showSimpleModal('Ürünü talep et','Kısa bir not yaz. İhtiyaç durumun bağışçıya gösterilmez.',`<form data-form="donation-request" data-id="${id}"><div class="field"><label>Talep notu</label><textarea name="note" maxlength="500" required></textarea></div><button class="btn btn-primary">Talep gönder</button></form>`);
    if(action==='report') return showSimpleModal('İlanı bildir','Sorunu kısaca açıkla; yönetici inceleyecek.',`<form data-form="report" data-id="${id}"><div class="field"><label>Bildirim nedeni</label><textarea name="reason" maxlength="500" required></textarea></div><button class="btn btn-primary">Bildir</button></form>`);
@@ -517,9 +548,9 @@ document.addEventListener('submit',async event=>{
  const form=event.target.closest('[data-form]'); if(!form)return; event.preventDefault();
  const type=form.dataset.form, data=Object.fromEntries(new FormData(form).entries()); const submit=form.querySelector('[type="submit"],button:not([type])'); if(submit)submit.disabled=true;
  try{
-  if(type==='register'){const validation=validateRegistration(data,state.universities);showRegistrationErrors(form,validation.fields,Object.keys(validation.fields).length?'Lütfen işaretli alanları kontrol et.':'',true);if(Object.keys(validation.fields).length)return;Object.assign(data,validation.values);data.rememberMe=data.rememberMe==='true';const result=await api('/api/register',{method:'POST',body:data});if(result.user){state.user=result.user;connectMessageStream();await refreshUnread();closeModal();toast(result.message);return render();}state.pendingEmail=data.email;state.pendingRememberMe=data.rememberMe;state.devCode=result.devCode||'';state.authTab='verify';drawModal();toast(result.message);return;}
+  if(type==='register'){const validation=validateRegistration(data,state.universities);showRegistrationErrors(form,validation.fields,Object.keys(validation.fields).length?'Lütfen işaretli alanları kontrol et.':'',true);if(Object.keys(validation.fields).length)return;Object.assign(data,validation.values);data.rememberMe=data.rememberMe==='true';const result=await api('/api/register',{method:'POST',body:data});if(result.user){state.user=result.user;connectMessageStream();refreshUnread().catch(()=>{});closeModal();toast(result.message);return render();}state.pendingEmail=data.email;state.pendingRememberMe=data.rememberMe;state.devCode=result.devCode||'';state.authTab='verify';drawModal();toast(result.message);return;}
   if(type==='verify'){data.rememberMe=state.pendingRememberMe;const result=await api('/api/verify-email',{method:'POST',body:data});state.user=result.user;connectMessageStream();closeModal();toast('E-posta doğrulandı.');return render();}
-  if(type==='login'){data.rememberMe=data.rememberMe==='true';const result=await api('/api/login',{method:'POST',body:data});state.user=result.user;connectMessageStream();await refreshUnread();closeModal();toast('Hoş geldin!');return render();}
+  if(type==='login'){data.rememberMe=data.rememberMe==='true';const result=await api('/api/login',{method:'POST',body:data});state.user=result.user;connectMessageStream();refreshUnread().catch(()=>{});closeModal();toast('Hoş geldin!');return render();}
   if(type==='listing'){const body=new FormData(form);if(body.getAll('photos').length>6)throw new Error('En fazla 6 fotoğraf ekleyebilirsin.');if(body.get('kind')==='donation')body.set('price','0');const result=await api('/api/listings',{method:'POST',body});localStorage.removeItem('unipazar-listing-draft');selectedListingPhotos=[];toast('İlan yayınlandı.');return go('/listing/'+result.id);}
   if(type==='admin-remove-listing'){await api('/api/listings/'+form.dataset.id,{method:'PATCH',body:{status:'removed'}});closeModal();toast('İlan kaldırıldı.');return render();}
   if(type==='edit-listing'){if(keptEditPhotos.length+newEditPhotos.length<1)throw new Error('En az bir fotoğraf gerekli.');const body=new FormData(form);body.set('keepPhotos',JSON.stringify(keptEditPhotos));newEditPhotos.forEach(photo=>body.append('photos',photo.file));await api(`/api/listings/${form.dataset.id}`,{method:'PATCH',body});closeModal();toast('İlan güncellendi.');return render();}
