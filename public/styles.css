@@ -58,6 +58,15 @@ html{scrollbar-gutter:stable}body,.topbar,.panel,.card,.donation-banner{transiti
 
 .message-ticks{float:left;margin-right:10px}.category-menu summary::-webkit-details-marker{display:none}
 .category-options{max-height:min(340px,45vh);overflow-y:auto}
+.message-badge[hidden]{display:none!important}
+@media(max-width:700px){
+ .category-menu{max-width:100%}
+ .category-menu[open]{z-index:10}
+ .category-options{left:0;right:auto;width:min(280px,calc(100vw - 36px));min-width:0;max-width:none;max-height:min(260px,32dvh);overflow-x:hidden}
+ .category-options button{width:100%;white-space:normal;overflow-wrap:anywhere;line-height:1.3}
+ .footer-inner span{display:block;line-height:1.5}
+ .footer-inner span+span{margin-top:8px}
+}
 
 .field-error{display:block;margin-top:6px;font-size:13px;line-height:1.4;color:#b62743}.field-error[hidden],.registration-alert[hidden]{display:none}.field input[aria-invalid=true]{border-color:#c43150;box-shadow:0 0 0 2px #c4315012}.registration-alert{padding:12px 14px;margin:0 0 16px;border-radius:12px;background:#fff0f2;border:1px solid #edb7c2;color:#9d2039;font-size:14px}html[data-theme=dark] .field-error{color:#ff9eb0}html[data-theme=dark] .registration-alert{background:#442b39;border-color:#915069;color:#ffd2dc}.modal:has([data-form=register]){max-height:calc(100dvh - 32px);overflow-y:auto}
 
