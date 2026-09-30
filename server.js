@@ -1,4 +1,5 @@
 import {validateRegistration} from './public/registration-validation.js';
+import {brevoConfigured, sendBrevoVerificationCode} from './email-delivery.js';
 import express from 'express';
 import multer from 'multer';
 import nodemailer from 'nodemailer';
@@ -220,24 +221,26 @@ const mailer = process.env.SMTP_HOST && process.env.SMTP_FROM ? nodemailer.creat
   host: process.env.SMTP_HOST, port: Number(process.env.SMTP_PORT || 587), secure: Number(process.env.SMTP_PORT || 587) === 465,
   auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined
 }) : null;
+const emailVerificationAvailable = () => Boolean(mailer || brevoConfigured() || testEmailCodes);
 const issueCode = async user => {
   const code = randomCode();
   db.prepare('INSERT OR REPLACE INTO verification_codes(user_id,code_hash,expires_at) VALUES(?,?,?)').run(user.id, hash(code), Date.now() + 15 * 60000);
-  if (mailer) await mailer.sendMail({ from: process.env.SMTP_FROM, to: user.email, subject: 'Üni Satış e-posta doğrulama kodu', text: `Doğrulama kodun: ${code}. Kod 15 dakika geçerlidir.` });
+  if (brevoConfigured()) await sendBrevoVerificationCode(user.email, code);
+  else if (mailer) await mailer.sendMail({ from: process.env.SMTP_FROM, to: user.email, subject: 'Üni Satış e-posta doğrulama kodu', text: `Doğrulama kodun: ${code}. Kod 15 dakika geçerlidir.` });
   return testEmailCodes ? code : undefined;
 };
 
-app.get('/api/me', (req, res) => res.json({ user: publicUser(currentUser(req)),emailVerificationAvailable:!!mailer||testEmailCodes }));
-app.get('/api/universities', (_req, res) => res.json({ universities, emailVerificationAvailable: !!mailer || testEmailCodes }));
+app.get('/api/me', (req, res) => res.json({ user: publicUser(currentUser(req)),emailVerificationAvailable:emailVerificationAvailable() }));
+app.get('/api/universities', (_req, res) => res.json({ universities, emailVerificationAvailable: emailVerificationAvailable() }));
 app.post('/api/register', wrap(async (req, res) => {
   const validation=validateRegistration(req.body, [...universityNames]);
   if(Object.keys(validation.fields).length)return res.status(400).json({error:'Lütfen işaretli alanları kontrol et.',fields:validation.fields});
   const {name,email,university,password,phone}=validation.values;
-  if (!dev && !mailer) return fail(res,503,'Kayıt şu anda açılamıyor. Lütfen daha sonra tekrar dene.');
+  if (!dev && !emailVerificationAvailable()) return fail(res,503,'Kayıt şu anda açılamıyor. Lütfen daha sonra tekrar dene.');
   if (db.prepare('SELECT id FROM users WHERE email=?').get(email)) return res.status(409).json({error:'Bu e-posta zaten kayıtlı. Giriş yapabilir veya başka bir e-posta kullanabilirsin.',fields:{email:'Bu e-posta zaten kayıtlı.'}});
   const result = db.prepare('INSERT INTO users(name,email,password_hash,university,campus,role,student_status,phone) VALUES(?,?,?,?,?,?,?,?)').run(name, email, await passwordHash(password), university, '', 'student', 'pending',phone);
   const user = db.prepare('SELECT * FROM users WHERE id=?').get(result.lastInsertRowid);
-  if (!mailer && !testEmailCodes) {
+  if (!emailVerificationAvailable()) {
     setSession(res, user.id, req.body.rememberMe === true);
     return res.status(201).json({ message: 'Hesabın açıldı.', user: publicUser(user) });
   }
@@ -262,7 +265,7 @@ app.post('/api/verify-email', (req, res) => {
 app.post('/api/resend-code', wrap(async (req, res) => {
   const user = db.prepare('SELECT * FROM users WHERE email=?').get(clean(req.body.email, 160).toLowerCase());
   if (!user || user.closed_at || user.email_verified) return res.json({ message: 'Hesap varsa ve doğrulanmamışsa yeni kod gönderildi.' });
-  if (!mailer && !testEmailCodes) return fail(res,503,'E-posta gönderim servisi henüz yapılandırılmadı.');
+  if (!emailVerificationAvailable()) return fail(res,503,'E-posta gönderim servisi henüz yapılandırılmadı.');
   let devCode;
   try { devCode = await issueCode(user); }
   catch { return fail(res,503,'Doğrulama e-postası gönderilemedi. Lütfen tekrar dene.'); }
@@ -305,7 +308,7 @@ app.patch('/api/me/email', wrap(async (req, res) => {
       return fail(res,503,'Doğrulama e-postası gönderilemedi; e-posta değiştirilmedi.');
     }
   } else db.prepare('DELETE FROM verification_codes WHERE user_id=?').run(user.id);
-  res.json({ user:publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(user.id)), verificationRequired:!!(mailer || testEmailCodes), devCode });
+  res.json({ user:publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(user.id)), verificationRequired:emailVerificationAvailable(), devCode });
 }));
 app.patch('/api/me/phone', wrap(async (req, res) => {
   const user = requireUser(req,res); if (!user) return;
