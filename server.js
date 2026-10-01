@@ -2,6 +2,7 @@ import {validateRegistration} from './public/registration-validation.js';
 import {brevoConfigured, sendBrevoVerificationCode} from './email-delivery.js';
 import express from 'express';
 import multer from 'multer';
+import {preparePhoto, MAX_PHOTO_BYTES} from './image-upload.js';
 import nodemailer from 'nodemailer';
 import { DatabaseSync } from 'node:sqlite';
 import { randomBytes, randomInt, scrypt as scryptCallback, timingSafeEqual, createHash } from 'node:crypto';
@@ -412,27 +413,27 @@ app.get('/api/sellers/:id/listings', (req, res) => {
   const listings = db.prepare(`${listingSelect} WHERE l.seller_id=? AND l.kind='sale' AND l.status='active' ORDER BY l.created_at DESC`).all(seller.id);
   res.json({ seller, listings });
 });
-const upload = multer({ storage: multer.memoryStorage(), limits: { files: 6, fileSize: 5 * 1024 * 1024 } });
-const imageType = buffer => buffer.subarray(0,3).equals(Buffer.from([0xff,0xd8,0xff])) ? 'jpg' : buffer.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])) ? 'png' : buffer.subarray(0,4).toString() === 'RIFF' && buffer.subarray(8,12).toString() === 'WEBP' ? 'webp' : null;
+const upload = multer({ storage: multer.memoryStorage(), limits: { files: 6, fileSize: MAX_PHOTO_BYTES } });
 const voiceType = buffer => buffer.subarray(0,4).equals(Buffer.from([0x1a,0x45,0xdf,0xa3])) ? 'webm' : buffer.subarray(0,4).toString() === 'OggS' ? 'ogg' : buffer.length >= 12 && buffer.subarray(4,8).toString() === 'ftyp' ? 'mp4' : null;
-app.post('/api/listings', upload.array('photos',6), (req, res) => {
+app.post('/api/listings', upload.array('photos',6), async (req, res) => {
   const user = requireUser(req,res); if (!user) return;
   const kind = clean(req.body.kind), title = clean(req.body.title,100), description = clean(req.body.description,2000), category = clean(req.body.category,60), condition = clean(req.body.condition,40);
   const priceText = String(req.body.price ?? '');
   const price = kind === 'donation' ? 0 : Number(priceText) * 100;
   if (!['sale','donation'].includes(kind) || !title || !description || !category || !condition || (kind === 'sale' && !/^\d{1,9}$/.test(priceText)) || !Number.isSafeInteger(price) || price < 0) return fail(res,400,'İlan bilgilerini kontrol et.');
   if (!req.files?.length) return fail(res,400,'En az bir ürün fotoğrafı ekle.');
-  const types = req.files.map(file => imageType(file.buffer));
-  if (types.some(type => !type)) return fail(res,400,'Yalnızca JPEG, PNG veya WebP fotoğraf yükle.');
+  let photos;
+  try { photos = []; for(const file of req.files) photos.push(await preparePhoto(file)); }
+  catch(error){ return fail(res,400,error.message); }
   const result = db.prepare('INSERT INTO listings(seller_id,kind,title,description,category,condition,price,university,campus) VALUES(?,?,?,?,?,?,?,?,?)').run(user.id,kind,title,description,category,condition,price,user.university,'');
-  req.files.forEach((file,index) => {
-    const filename = `${randomBytes(16).toString('hex')}.${types[index]}`;
-    fs.writeFileSync(path.join(uploadDir,filename),file.buffer);
+  photos.forEach((photo,index) => {
+    const filename = `${randomBytes(16).toString('hex')}.${photo.type}`;
+    fs.writeFileSync(path.join(uploadDir,filename),photo.buffer);
     db.prepare('INSERT INTO listing_images(listing_id,filename,position) VALUES(?,?,?)').run(result.lastInsertRowid,filename,index);
   });
   res.status(201).json({ id: Number(result.lastInsertRowid) });
 });
-app.patch('/api/listings/:id', upload.array('photos',6), (req, res) => {
+app.patch('/api/listings/:id', upload.array('photos',6), async (req, res) => {
   const user = requireUser(req,res); if (!user) return;
   const listing = db.prepare('SELECT * FROM listings WHERE id=?').get(req.params.id);
   if (!listing || (listing.seller_id !== user.id && user.role !== 'admin')) return fail(res,404,'İlan bulunamadı.');
@@ -452,11 +453,12 @@ app.patch('/api/listings/:id', upload.array('photos',6), (req, res) => {
   }
   const files=req.files||[];
   if(kept.length+files.length<1||kept.length+files.length>6)return fail(res,400,'İlanda 1 ile 6 fotoğraf olmalı.');
-  const types=files.map(file=>imageType(file.buffer));
-  if(types.some(type=>!type))return fail(res,400,'Yalnızca JPEG, PNG veya WebP fotoğraf yükle.');
+  let photos;
+  try { photos = []; for(const file of files) photos.push(await preparePhoto(file)); }
+  catch(error){ return fail(res,400,error.message); }
   const added=[];
   try{
-    files.forEach((file,index)=>{const filename=`${randomBytes(16).toString('hex')}.${types[index]}`;fs.writeFileSync(path.join(uploadDir,filename),file.buffer);added.push(filename);});
+    photos.forEach(photo=>{const filename=`${randomBytes(16).toString('hex')}.${photo.type}`;fs.writeFileSync(path.join(uploadDir,filename),photo.buffer);added.push(filename);});
     transaction(()=>{
       db.prepare('UPDATE listings SET title=?,description=?,category=?,condition=?,price=?,status=? WHERE id=?').run(title,description,category,condition,listing.kind === 'donation' ? 0 : price,status || listing.status,listing.id);
       db.prepare('DELETE FROM listing_images WHERE listing_id=?').run(listing.id);
@@ -533,7 +535,7 @@ app.get('/api/conversations/:id/messages', (req, res) => {
   if(readResult.changes)notifyConversation(conversation,user.id);
   res.json({ messages:db.prepare('SELECT id,sender_id,body,created_at,photo_filename,voice_filename,read_at FROM messages WHERE conversation_id=? ORDER BY id ASC LIMIT 200').all(conversation.id) });
 });
-app.post('/api/conversations/:id/messages', upload.fields([{name:'photo',maxCount:1},{name:'voice',maxCount:1}]), (req, res) => {
+app.post('/api/conversations/:id/messages', upload.fields([{name:'photo',maxCount:1},{name:'voice',maxCount:1}]), async (req, res) => {
   const user = requireUser(req,res); if (!user) return;
   const conversation = db.prepare('SELECT * FROM conversations WHERE id=?').get(req.params.id);
   if (!conversation || ![conversation.buyer_id,conversation.seller_id].includes(user.id)) return fail(res,404,'Konuşma bulunamadı.');
@@ -543,12 +545,14 @@ app.post('/api/conversations/:id/messages', upload.fields([{name:'photo',maxCoun
   const photo=req.files?.photo?.[0], voice=req.files?.voice?.[0];
   if (!body && !photo && !voice) return fail(res,400,'Boş mesaj gönderilemez.');
   if (photo && voice) return fail(res,400,'Bir mesajda yalnızca bir fotoğraf veya ses kaydı gönder.');
-  const photoType=photo?imageType(photo.buffer):null, audioType=voice?voiceType(voice.buffer):null;
-  if(photo && !photoType)return fail(res,400,'Yalnızca JPEG, PNG veya WebP fotoğraf yükle.');
+  let preparedPhoto=null;
+  try { if(photo) preparedPhoto=await preparePhoto(photo); }
+  catch(error){ return fail(res,400,error.message); }
+  const photoType=preparedPhoto?.type, audioType=voice?voiceType(voice.buffer):null;
   if(voice && !audioType)return fail(res,400,'Desteklenmeyen ses kaydı biçimi.');
   const filename=photoType?`${randomBytes(16).toString('hex')}.${photoType}`:null;
   const voiceFilename=audioType?`${randomBytes(16).toString('hex')}.${audioType}`:null;
-  if(filename)fs.writeFileSync(path.join(messageUploadDir,filename),photo.buffer);
+  if(filename)fs.writeFileSync(path.join(messageUploadDir,filename),preparedPhoto.buffer);
   if(voiceFilename)fs.writeFileSync(path.join(voiceUploadDir,voiceFilename),voice.buffer);
   let messageId;
   try { messageId=db.prepare('INSERT INTO messages(conversation_id,sender_id,body,photo_filename,voice_filename) VALUES(?,?,?,?,?)').run(conversation.id,user.id,body,filename,voiceFilename).lastInsertRowid; }
@@ -823,7 +827,7 @@ app.use(express.static(path.join(root,'public')));
 app.use((req, res) => res.sendFile(path.join(root,'public','index.html')));
 app.use((err, req, res, next) => {
   console.error(err);
-  if (err instanceof multer.MulterError) return fail(res,400,'Dosya sınırı aşıldı (en çok 6 fotoğraf; dosya başına 5 MB).');
+  if (err instanceof multer.MulterError) return fail(res,400,'Dosya sınırı aşıldı (en çok 6 fotoğraf; dosya başına 12 MB).');
   return fail(res,500,'Beklenmeyen bir hata oluştu.');
 });
 app.listen(port, localMode?'127.0.0.1':undefined, () => console.log(`Üni Satış hazır: http://localhost:${port}`));
