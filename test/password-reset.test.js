@@ -41,6 +41,21 @@ test('password reset codes expire, lock after failed attempts, cannot replay and
  const locked=await renew();
  for(let i=0;i<5;i++)assert.equal((await request('/api/password-reset/confirm','POST',{email:'new-seller@example.com',code:'invalid',password:'ghijkl'})).status,400);
  assert.equal((await request('/api/password-reset/confirm','POST',{email:'new-seller@example.com',code:locked.data.devCode,password:'ghijkl'})).status,400);
+ assert.equal((await request('/api/resend-code','POST',{email:''})).status,400);
+ const blocked=await request('/api/resend-code','POST',{email:'new-seller@example.com'});
+ assert.equal(blocked.status,429);
+ assert.ok(blocked.data.retryAfter>0&&blocked.data.retryAfter<=60);
+ resetDb.prepare('UPDATE verification_codes SET expires_at=expires_at-61000 WHERE user_id=?').run(userId);
+ const resent=await request('/api/resend-code','POST',{email:'new-seller@example.com'});
+ assert.equal(resent.status,200);
+ assert.match(resent.data.devCode,/^\d{6}$/);
+ assert.equal(resent.data.retryAfter,60);
+ assert.equal((await request('/api/resend-code','POST',{email:'new-seller@example.com'})).status,429);
+ const unknown=await request('/api/resend-code','POST',{email:'unknown@example.com'});
+ assert.equal(unknown.data.message,resent.data.message);
+ const storedCode=resetDb.prepare('SELECT code_hash FROM verification_codes WHERE user_id=?').get(userId);
+ assert.ok(storedCode.code_hash);
+ assert.equal((await request('/api/verify-email','POST',{email:'new-seller@example.com',code:resent.data.devCode})).status,200);
+ assert.equal((await request('/api/resend-code','POST',{email:'new-seller@example.com'})).data.message,resent.data.message);
  resetDb.close();
 });
-

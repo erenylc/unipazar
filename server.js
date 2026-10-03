@@ -329,13 +329,19 @@ app.post('/api/verify-email', (req, res) => {
   res.json({ user: publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(user.id)) });
 });
 app.post('/api/resend-code', wrap(async (req, res) => {
-  const user = db.prepare('SELECT * FROM users WHERE email=?').get(clean(req.body.email, 160).toLowerCase());
-  if (!user || user.closed_at || user.email_verified) return res.json({ message: 'Hesap varsa ve doğrulanmamışsa yeni kod gönderildi.' });
+  const email=clean(req.body.email,160).toLowerCase();
+  if(!/^\S+@[^\s@]+\.[^\s@]+$/.test(email))return fail(res,400,'Geçerli bir e-posta adresi gir.');
+  const message='Bu adresle doğrulanmamış bir hesap varsa yeni doğrulama kodu gönderildi. Gelen kutunu ve spam klasörünü kontrol et.';
+  const user = db.prepare('SELECT * FROM users WHERE email=?').get(email);
+  if (!user || user.closed_at || user.email_verified) return res.json({message,retryAfter:60});
   if (!emailVerificationAvailable()) return fail(res,503,'E-posta gönderim servisi henüz yapılandırılmadı.');
+  const previous=db.prepare('SELECT expires_at FROM verification_codes WHERE user_id=?').get(user.id);
+  const retryAfter=previous?Math.max(0,Math.ceil((previous.expires_at-15*60000+60000-Date.now())/1000)):0;
+  if(retryAfter)return res.status(429).set('Retry-After',String(retryAfter)).json({error:'Yeni kod istemeden önce bekleme süresinin dolmasını bekle.',retryAfter});
   let devCode;
   try { devCode = await issueCode(user); }
   catch { return fail(res,503,'Doğrulama e-postası gönderilemedi. Lütfen tekrar dene.'); }
-  res.json({ message: 'Yeni kod gönderildi.', devCode });
+  res.json({message,devCode,retryAfter:60});
 }));
 app.post('/api/login', wrap(async (req, res) => {
   const user = db.prepare('SELECT * FROM users WHERE email=?').get(clean(req.body.email, 160).toLowerCase());

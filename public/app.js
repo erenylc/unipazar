@@ -53,7 +53,7 @@ async function performApi(url, options={}){
    console.info('[API]',JSON.stringify({method:options.method||'GET',url,status:res.status,response}));
   }
 
-  if(!res.ok){const original=data.error||'İşlem tamamlanamadı.', translated=translateText(original,language);const error=new Error(language==='tr'||translated!==original?translated:translateText('İşlem tamamlanamadı.',language));error.fields=data.fields;throw error;}
+  if(!res.ok){const original=data.error||'İşlem tamamlanamadı.', translated=translateText(original,language);const error=new Error(language==='tr'||translated!==original?translated:translateText('İşlem tamamlanamadı.',language));error.fields=data.fields;error.retryAfter=data.retryAfter;throw error;}
   return data;
 }
 function route(){ return (location.hash || '#/').slice(1); }
@@ -331,10 +331,46 @@ function drawModal(){
  $('#modal-root')?.remove(); if(html) document.body.insertAdjacentHTML('beforeend',`<div id="modal-root">${html}</div>`);
  if(html)applyLocale($('#modal-root'),language);
  setupRegistrationForm();
+ setupVerificationResend();
  if(state.modal==='auth' && ['login','register'].includes(state.authTab) && !state.googleProfile && state.googleClientId){
   $('.auth-tabs').insertAdjacentHTML('beforebegin','<div class="google-auth"><div id="googleSignIn"></div><p class="hint" id="googleSignInStatus" role="status">Google ile giriş yükleniyor…</p></div><div class="auth-divider"><span>veya</span></div>');
   setupGoogleSignIn().catch(()=>{const status=$('#googleSignInStatus');if(status)status.textContent='Google ile giriş yüklenemedi. E-posta ile devam edebilirsin.';});
  }
+}
+let verificationResendTimer;
+function setupVerificationResend(){
+ clearInterval(verificationResendTimer);
+ if(!$('[data-action="resend-code"]'))return;
+ $('#verifyEmail')?.addEventListener('input',()=>{state.verificationMessage='';updateVerificationResend();});
+ updateVerificationResend();
+ verificationResendTimer=setInterval(()=>{if(!$('[data-action="resend-code"]'))return clearInterval(verificationResendTimer);updateVerificationResend();},1000);
+}
+function updateVerificationResend(){
+ const button=$('[data-action="resend-code"]'),status=$('#verificationSendStatus');
+ if(!button||!status)return;
+ const email=$('#verifyEmail')?.value.trim().toLowerCase();
+ const seconds=state.verificationResendEmail===email?Math.max(0,Math.ceil(((state.verificationResendUntil||0)-Date.now())/1000)):0;
+ button.disabled=!!state.verificationBusy||seconds>0;
+ button.textContent=state.verificationBusy?'Gönderiliyor…':seconds?`${seconds} saniye sonra tekrar gönder`:'Yeni kod gönder';
+ status.textContent=state.verificationMessage||'';
+ status.hidden=!status.textContent;
+ status.dataset.error=state.verificationError?'true':'false';
+}
+async function resendVerificationCode(){
+ const input=$('#verifyEmail');
+ if(!input||!input.reportValidity()||state.verificationBusy)return;
+ const email=input.value.trim().toLowerCase();
+ if(state.verificationResendEmail===email&&state.verificationResendUntil>Date.now())return;
+ state.pendingEmail=email;state.verificationBusy=true;state.verificationError=false;state.verificationMessage='Doğrulama kodu gönderiliyor…';updateVerificationResend();
+ try{
+  const result=await api('/api/resend-code',{method:'POST',body:{email}});
+  state.devCode=result.devCode||'';state.verificationResendEmail=email;state.verificationResendUntil=Date.now()+(result.retryAfter||60)*1000;
+  state.verificationMessage=result.message;
+  if(state.modal==='auth'&&state.authTab==='verify'&&$('#verifyEmail')?.value.trim().toLowerCase()===email)drawModal();
+ }catch(error){
+  state.verificationError=true;state.verificationMessage=error.message;
+  if(error.retryAfter){state.verificationResendEmail=email;state.verificationResendUntil=Date.now()+error.retryAfter*1000;}
+ }finally{state.verificationBusy=false;updateVerificationResend();}
 }
 let googleScriptRequest=null;
 async function setupGoogleSignIn(){
@@ -507,6 +543,7 @@ document.addEventListener('click',async event=>{
   try{
    if(action==='close-modal') return closeModal();
    if(action==='forgot-password'){state.resetEmail=$('[data-form="login"] input[name="email"]')?.value || state.resetEmail || '';state.resetDevCode='';state.authTab='reset-request';state.modal='auth';return drawModal();}
+   if(action==='resend-code'){await resendVerificationCode();return;}
    if(action==='photo-menu'){discardVoiceRecording();state.modal='camera';drawModal();return;}
    if(action==='edit-message')return showSimpleModal('Mesajı düzenle','',`<form data-form="edit-message" data-id="${id}"><textarea name="body" maxlength="2000" required>${escapeHtml(target.dataset.body)}</textarea><button class="btn btn-primary">Kaydet</button></form>`);
    if(action==='delete-message'){await api('/api/messages/'+id,{method:'DELETE'});return renderMessages();}
@@ -605,7 +642,6 @@ document.addEventListener('click',async event=>{
    if(action==='admin-support'){await api(`/api/admin/support/${id}`,{method:'PATCH',body:{status:target.dataset.status}});toast('Destek başvurusu güncellendi.');return render();}
    if(action==='admin-report'){await api(`/api/admin/reports/${id}`,{method:'PATCH',body:{removeListing:!!target.dataset.remove}});toast('Şikâyet kapatıldı.');return render();}
    if(action==='resend-profile-code'){const result=await api('/api/resend-code',{method:'POST',body:{email:state.user.email}});state.devCode=result.devCode||'';toast(result.message);return render();}
-   if(action==='resend-code'){const email=$('[data-form="verify"] [name="email"]')?.value;const result=await api('/api/resend-code',{method:'POST',body:{email}});state.devCode=result.devCode||'';drawModal();toast(result.message);}
   }catch(error){toast(error.message);}
  }
  const conversation=event.target.closest('[data-conversation]'); if(conversation){event.preventDefault();state.selectedConversation=Number(conversation.dataset.conversation);render();}
@@ -615,7 +651,7 @@ document.addEventListener('submit',async event=>{
  const form=event.target.closest('[data-form]'); if(!form)return; event.preventDefault();
  const type=form.dataset.form, data=Object.fromEntries(new FormData(form).entries()); const submit=form.querySelector('[type="submit"],button:not([type])'); if(submit)submit.disabled=true;
  try{
-  if(type==='register'){const validation=registrationValidation(data);showRegistrationErrors(form,validation.fields,Object.keys(validation.fields).length?'Lütfen işaretli alanları kontrol et.':'',true);if(Object.keys(validation.fields).length)return;Object.assign(data,validation.values);data.rememberMe=false;data.google=!!state.googleProfile;const result=await api('/api/register',{method:'POST',body:data});if(result.user){state.user=result.user;connectMessageStream();refreshUnread().catch(()=>{});closeModal();toast(result.message);return render();}state.pendingEmail=data.email;state.pendingRememberMe=data.rememberMe;state.devCode=result.devCode||'';state.authTab='verify';drawModal();toast(result.message);return;}
+  if(type==='register'){const validation=registrationValidation(data);showRegistrationErrors(form,validation.fields,Object.keys(validation.fields).length?'Lütfen işaretli alanları kontrol et.':'',true);if(Object.keys(validation.fields).length)return;Object.assign(data,validation.values);data.rememberMe=false;data.google=!!state.googleProfile;const result=await api('/api/register',{method:'POST',body:data});if(result.user){state.user=result.user;connectMessageStream();refreshUnread().catch(()=>{});closeModal();toast(result.message);return render();}state.pendingEmail=data.email;state.pendingRememberMe=data.rememberMe;state.devCode=result.devCode||'';state.verificationMessage='Doğrulama kodu e-postana gönderildi. Gelen kutunu ve spam klasörünü kontrol et.';state.verificationError=false;state.verificationResendEmail=data.email.toLowerCase();state.verificationResendUntil=Date.now()+60000;state.authTab='verify';drawModal();toast(result.message);return;}
   if(type==='verify'){data.rememberMe=state.pendingRememberMe;const result=await api('/api/verify-email',{method:'POST',body:data});state.user=result.user;connectMessageStream();closeModal();toast('E-posta doğrulandı.');return render();}
   if(type==='login'){data.rememberMe=data.rememberMe==='true';const result=await api('/api/login',{method:'POST',body:data});state.user=result.user;connectMessageStream();refreshUnread().catch(()=>{});closeModal();toast('Hoş geldin!');return render();}
   if(type==='reset-request'){const result=await api('/api/password-reset/request',{method:'POST',body:data});state.resetEmail=data.email;state.resetDevCode=result.devCode||'';state.authTab='reset-password';drawModal();return;}
