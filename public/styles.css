@@ -111,3 +111,7 @@ html{scrollbar-gutter:stable}body,.topbar,.panel,.card,.donation-banner{transiti
 .profile-summary span{font-size:14px;line-height:1.5;font-weight:600}.profile-summary small{font-size:13px;line-height:1.5}
 html[data-theme=dark] .profile-summary span{color:#ded9ee}html[data-theme=dark] .profile-summary small{color:#c7c3d8}html[data-theme=dark] .chat-person-link{color:#f1eaff}html[data-theme=dark] .chat-header{border-color:#45445d}html[data-theme=dark] .chat-header small,html[data-theme=dark] .chat-item small{color:#cbc8df}
 .messages{background:#f8f5ef url('/chat-antique-pattern.svg') repeat;background-size:360px 300px}html[data-theme=dark] .messages{background:#202234 url('/chat-antique-pattern.svg') repeat;background-size:360px 300px}
+
+.phone-required-actions{display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin-top:20px}
+.profile-menu button.profile-logout{color:#b42332;font-weight:700}.profile-menu button.profile-logout:hover{background:#fff0f1}html[data-theme=dark] .profile-menu button.profile-logout{color:#ff9ca7}html[data-theme=dark] .profile-menu button.profile-logout:hover{background:#422b3b}
+@media(max-width:700px){.mobile-nav a.mobile-nav-create.active,html[data-theme=dark] .mobile-nav a.mobile-nav-create.active{background:transparent}.mobile-nav .mobile-nav-create.active .mobile-nav-icon{outline:none}.mobile-nav .mobile-nav-create.active .mobile-nav-label{font-weight:800;color:#51458b}html[data-theme=dark] .mobile-nav .mobile-nav-create.active .mobile-nav-label{color:#e3d7ff}}

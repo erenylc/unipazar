@@ -163,12 +163,11 @@ function ownListingCard(item){
 }
 function ensureSellingPhone(){
  if(state.user.phone)return true;
- pageFrame(`<main class="shell page narrow-page"><section class="panel"><h2>Telefon numaranı ekle</h2><p>İlan vermek için telefon bilgilerini tamamlaman gerekiyor.</p><button class="btn btn-primary" data-action="change-phone">Telefon numarası ekle</button><a class="btn btn-light" href="#/">İlanlara dön</a></section></main>`,'/sell');
+ pageFrame(`<main class="shell page narrow-page"><section class="panel"><h2>Telefon numaranı ekle</h2><p>İlan vermek için telefon bilgilerini tamamlaman gerekiyor.</p><div class="phone-required-actions"><button class="btn btn-primary" data-action="change-phone">Telefon numarası ekle</button><a class="btn btn-light" href="#/sell">Seçeneklere dön</a></div></section></main>`,'/sell');
  return false;
 }
 function renderSellChoice(){
  if(!state.user){showAuth();return;}
- if(!ensureSellingPhone())return;
  pageFrame(`<main class="shell page narrow-page"><div class="section-head"><div><h2>Nasıl ilan vermek istersin?</h2><p>${escapeHtml(state.user.university)} öğrencileri için bir seçenek seç.</p></div></div><div class="choice-grid"><a class="choice-card" href="#/sell-sale"><span class="choice-icon">↗</span><h3>İkinci el satış</h3><p>Ürününe fiyat belirle ve üniversitendeki öğrencilere satışa çıkar.</p><strong>Satılık ilan ver →</strong></a><a class="choice-card choice-free" href="#/sell-donation"><span class="choice-icon">♡</span><h3>Ücretsiz ürün ver</h3><p>Kullanmadığın eşyayı desteğe ihtiyacı olan bir öğrenciye ücretsiz ver.</p><strong>Dayanışma ilanı ver →</strong></a></div></main>`,'/sell');
 }
 async function renderListingsDashboard(){
