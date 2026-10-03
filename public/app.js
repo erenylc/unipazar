@@ -97,17 +97,20 @@ async function loadListings(){
 async function refreshSearchResults(query){
  const params=new URLSearchParams();
  for(const [key,value] of Object.entries(state.filters)) if(value && !(key==='university' && value==='*')) params.set(key,value);
+ const grid=$('.grid'), filters=JSON.stringify(state.filters);
+ if(!grid)return;
+ grid.setAttribute('aria-busy','true');
+ const isCurrent=()=>grid===$('.grid') && filters===JSON.stringify(state.filters) && $('#searchInput')?.value===query && ['/','/donation'].includes(route());
  try{
   const {listings}=await api('/api/listings?'+params);
-  const input=$('#searchInput');
-  if(!input || input.value!==query || !['/','/donation'].includes(route())) return;
+  if(!isCurrent())return;
   state.listings=listings;
   $('.grid').innerHTML=listings.length?listings.map(listingCard).join(''):empty(query?'Sonuç bulunamadı':'Henüz ilan yok',query?'Başka bir ürün adı deneyebilirsin.':'İlk ilanı sen verebilirsin.');
   $('.result-count').textContent=`${listings.length} ilan`;
   applyLocale($('.grid'),language);
   $('.result-count').textContent=translateText(`${listings.length} ilan`,language);
   $('.grid').setAttribute('aria-busy','false');
- }catch(error){toast(error.message);$('.grid')?.setAttribute('aria-busy','false');}
+ }catch(error){if(isCurrent()){toast(error.message);grid.setAttribute('aria-busy','false');}}
 }
 async function renderBrowse(donations=false){
  if(donations && !state.user?.needsSupport){go('/support');return;}
@@ -576,7 +579,13 @@ document.addEventListener('click',async event=>{
     }
     $('#universityPickerSearch')?.focus();return;
    }
-   if(action==='select-university'){state.filters.university=target.dataset.university;closeModal();return render();}
+   if(action==='select-university'){
+    state.filters.university=target.dataset.university;
+    closeModal();
+    const label=$('.campus-picker span');
+    if(label)label.textContent=translateText(state.filters.university==='*'?'Tüm üniversiteler':state.filters.university,language);
+    return refreshSearchResults(state.filters.q);
+   }
    if(action==='retry-universities'){const form=target.closest('form');showRegistrationErrors(form,{});return populateRegistrationUniversities(form);}
    if(action==='auth-tab'){state.googleProfile=null;state.authTab=target.dataset.tab;return drawModal();}
    if(action==='sell'){ if(!state.user)return showAuth(); return go('/sell'); }
