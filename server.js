@@ -118,6 +118,12 @@ CREATE TABLE IF NOT EXISTS password_reset_codes (
  code_hash TEXT NOT NULL, expires_at INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
  requested_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS blocked_users (
+ blocker_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ blocked_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ PRIMARY KEY(blocker_id,blocked_id), CHECK(blocker_id<>blocked_id)
+);
 `);
 if (!db.prepare("PRAGMA table_info(users)").all().some(column => column.name === 'need_expires_at')) {
   db.exec('ALTER TABLE users ADD COLUMN need_expires_at INTEGER');
@@ -182,6 +188,26 @@ app.use((req, res, next) => {
     if (origin && origin !== `${req.protocol}://${req.get('host')}`) return res.status(403).json({ error: 'Geçersiz istek kaynağı.' });
   }
   next();
+});
+app.get('/.well-known/assetlinks.json', (_req, res) => {
+  const fingerprints = [process.env.PLAY_APP_SIGNING_SHA256, process.env.ANDROID_UPLOAD_SHA256]
+    .filter(value => typeof value === 'string' && /^(?:[A-Fa-f0-9]{2}:){31}[A-Fa-f0-9]{2}$/.test(value))
+    .map(value => value.toUpperCase());
+  if (!fingerprints.length) return res.status(404).end();
+  res.set('Cache-Control', 'public, max-age=300');
+  res.json([{
+    relation: ['delegate_permission/common.handle_all_urls'],
+    target: {
+      namespace: 'android_app',
+      package_name: 'com.unisatis.app',
+      sha256_cert_fingerprints: [...new Set(fingerprints)]
+    }
+  }]);
+});
+app.get('/api/public-contact',(_req,res)=>{
+  const email=String(process.env.LEGAL_CONTACT_EMAIL||'unisatis06@gmail.com').trim();
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))return res.status(404).end();
+  res.set('Cache-Control','public, max-age=300').json({email});
 });
 app.use('/api', (_req,_res,next) => { expireListings(); next(); });
 const attempts = new Map();
@@ -407,6 +433,35 @@ app.post('/api/logout', (req, res) => {
   res.clearCookie('up_session', { path: '/' });
   res.json({ ok: true });
 });
+app.delete('/api/me', (req,res) => {
+  const user=requireUser(req,res);if(!user)return;
+  if(user.role==='admin')return fail(res,403,'Yönetici hesabı bu yoldan silinemez.');
+  if(String(req.body?.confirmation||'').trim().toLocaleUpperCase('tr-TR')!=='SİL')return fail(res,400,'Hesabı silmek için SİL yaz.');
+  const listingPhotos=db.prepare('SELECT i.filename FROM listing_images i JOIN listings l ON l.id=i.listing_id WHERE l.seller_id=?').all(user.id);
+  const messageFiles=db.prepare(`SELECT photo_filename,voice_filename FROM messages WHERE sender_id=? OR conversation_id IN
+    (SELECT id FROM conversations WHERE buyer_id=? OR seller_id=?)`).all(user.id,user.id,user.id);
+  transaction(()=>{
+    db.prepare(`DELETE FROM reports WHERE reporter_id=? OR listing_id IN (SELECT id FROM listings WHERE seller_id=?)
+      OR message_id IN (SELECT id FROM messages WHERE sender_id=? OR conversation_id IN
+      (SELECT id FROM conversations WHERE buyer_id=? OR seller_id=?))`).run(user.id,user.id,user.id,user.id,user.id);
+    db.prepare('DELETE FROM admin_message_reviews WHERE conversation_id IN (SELECT id FROM conversations WHERE buyer_id=? OR seller_id=?)').run(user.id,user.id);
+    db.prepare('DELETE FROM handoffs WHERE proposed_by=? OR conversation_id IN (SELECT id FROM conversations WHERE buyer_id=? OR seller_id=?)').run(user.id,user.id,user.id);
+    db.prepare('DELETE FROM messages WHERE sender_id=? OR conversation_id IN (SELECT id FROM conversations WHERE buyer_id=? OR seller_id=?)').run(user.id,user.id,user.id);
+    db.prepare('DELETE FROM conversations WHERE buyer_id=? OR seller_id=?').run(user.id,user.id);
+    db.prepare('DELETE FROM offers WHERE buyer_id=? OR listing_id IN (SELECT id FROM listings WHERE seller_id=?)').run(user.id,user.id);
+    db.prepare('DELETE FROM donation_requests WHERE requester_id=? OR listing_id IN (SELECT id FROM listings WHERE seller_id=?)').run(user.id,user.id);
+    db.prepare('DELETE FROM favorites WHERE user_id=? OR listing_id IN (SELECT id FROM listings WHERE seller_id=?)').run(user.id,user.id);
+    db.prepare('DELETE FROM listing_images WHERE listing_id IN (SELECT id FROM listings WHERE seller_id=?)').run(user.id);
+    db.prepare('DELETE FROM listings WHERE seller_id=?').run(user.id);
+    db.prepare('DELETE FROM users WHERE id=?').run(user.id);
+  });
+  const removeStoredFile=(dir,name)=>{if(name&&path.basename(name)===name)fs.rmSync(path.join(dir,name),{force:true});};
+  for(const photo of listingPhotos)removeStoredFile(uploadDir,photo.filename);
+  for(const message of messageFiles){removeStoredFile(messageUploadDir,message.photo_filename);removeStoredFile(voiceUploadDir,message.voice_filename);}
+  for(const response of messageStreams.get(user.id)||[])response.end();messageStreams.delete(user.id);
+  res.clearCookie('up_session',{path:'/'});
+  res.json({ok:true});
+});
 app.patch('/api/me/profile', (req, res) => {
   const user = requireUser(req,res); if (!user) return;
   const name = clean(req.body.name,80);
@@ -614,11 +669,26 @@ app.delete('/api/listings/:id/favorite', (req, res) => {
   db.prepare('DELETE FROM favorites WHERE user_id=? AND listing_id=?').run(user.id,req.params.id);
   res.json({ favorite:false });
 });
+const usersBlocked = (first, second) => !!db.prepare('SELECT 1 FROM blocked_users WHERE (blocker_id=? AND blocked_id=?) OR (blocker_id=? AND blocked_id=?)').get(first,second,second,first);
+app.post('/api/users/:id/block', (req,res) => {
+  const user=requireUser(req,res);if(!user)return;
+  const blockedId=Number(req.params.id);
+  const target=Number.isSafeInteger(blockedId)?db.prepare('SELECT id,role FROM users WHERE id=? AND closed_at IS NULL').get(blockedId):null;
+  if(!target || target.id===user.id || target.role==='admin')return fail(res,400,'Bu kullanıcı engellenemez.');
+  db.prepare('INSERT OR IGNORE INTO blocked_users(blocker_id,blocked_id) VALUES(?,?)').run(user.id,target.id);
+  res.json({blocked:true});
+});
+app.delete('/api/users/:id/block', (req,res) => {
+  const user=requireUser(req,res);if(!user)return;
+  db.prepare('DELETE FROM blocked_users WHERE blocker_id=? AND blocked_id=?').run(user.id,req.params.id);
+  res.json({blocked:false});
+});
 app.post('/api/listings/:id/conversation', (req, res) => {
   const user = requireUser(req,res); if (!user) return;
   const listing = db.prepare('SELECT * FROM listings WHERE id=?').get(req.params.id);
   if (!listing || listing.status !== 'active' || listing.kind !== 'sale') return fail(res,404,'Aktif ilan bulunamadı.');
   if (listing.seller_id === user.id) return fail(res,400,'Kendi ilanına mesaj gönderemezsin.');
+  if (usersBlocked(user.id,listing.seller_id)) return fail(res,403,'Bu kullanıcıyla mesajlaşma kapalı.');
   db.prepare('INSERT OR IGNORE INTO conversations(listing_id,buyer_id,seller_id) VALUES(?,?,?)').run(listing.id,user.id,listing.seller_id);
   const conversation = db.prepare('SELECT id FROM conversations WHERE listing_id=? AND buyer_id=?').get(listing.id,user.id);
   res.json({ id: conversation.id });
@@ -631,7 +701,8 @@ app.get('/api/conversations', (req, res) => {
     (SELECT COUNT(*) FROM messages m WHERE m.conversation_id=c.id AND m.sender_id<>? AND m.read_at IS NULL) AS unread_count
     FROM conversations c LEFT JOIN listings l ON l.id=c.listing_id JOIN users u ON u.id=CASE WHEN c.buyer_id=? THEN c.seller_id ELSE c.buyer_id END
      WHERE (c.buyer_id=? OR c.seller_id=?) AND (c.listing_id IS NULL OR l.kind='sale' OR ?=1 OR l.seller_id=?) ORDER BY COALESCE(last_at,c.created_at) DESC`).all(user.id,user.id,user.id,user.id,user.support_verified,user.id);
-  res.json({ conversations:rows });
+  const blockedByMe=db.prepare('SELECT 1 FROM blocked_users WHERE blocker_id=? AND blocked_id=?');
+  res.json({ conversations:rows.map(row=>({...row,blockedByMe:!!blockedByMe.get(user.id,row.other_id),messagesClosed:usersBlocked(user.id,row.other_id)})) });
 });
 app.get('/api/message-events', (req,res) => {
   const user=requireUser(req,res); if(!user)return;
@@ -667,6 +738,7 @@ app.post('/api/conversations/:id/messages', upload.fields([{name:'photo',maxCoun
   if (!conversation || ![conversation.buyer_id,conversation.seller_id].includes(user.id)) return fail(res,404,'Konuşma bulunamadı.');
   const recipientId = conversation.buyer_id === user.id ? conversation.seller_id : conversation.buyer_id;
   if (db.prepare('SELECT closed_at FROM users WHERE id=?').get(recipientId)?.closed_at) return fail(res,409,'Bu hesap artık mesaj alamıyor.');
+  if (usersBlocked(user.id,recipientId)) return fail(res,403,'Bu kullanıcıyla mesajlaşma kapalı.');
   const body = clean(req.body?.body,2000);
   const photo=req.files?.photo?.[0], voice=req.files?.voice?.[0];
   if (!body && !photo && !voice) return fail(res,400,'Boş mesaj gönderilemez.');

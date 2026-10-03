@@ -2,6 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import vm from 'node:vm';
+import {spawn} from 'node:child_process';
+import {mkdtempSync, rmSync} from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 test('install manifest points to usable PNG icons and the same app',async()=>{
  const manifest=JSON.parse(await fs.readFile(new URL('../public/manifest.webmanifest',import.meta.url),'utf8'));
@@ -30,4 +34,36 @@ test('offline worker never intercepts private APIs or uploaded media',async()=>{
  let response;
  listeners.fetch({request:{url:'https://example.test/',method:'GET',mode:'navigate'},respondWith:promise=>response=promise});
  assert.equal(await response,fallback);
+});
+
+test('Android Digital Asset Links serves the configured signing fingerprint',async t=>{
+ const temp=mkdtempSync(path.join(os.tmpdir(),'unisatis-assetlinks-'));
+ const port=33000+Math.floor(Math.random()*1000);
+ const fingerprint=Array(32).fill('AB').join(':');
+ const server=spawn(process.execPath,['server.js'],{
+  cwd:process.cwd(),
+  env:{...process.env,PORT:String(port),DATA_DIR:path.join(temp,'data'),UPLOAD_DIR:path.join(temp,'uploads'),PLAY_APP_SIGNING_SHA256:fingerprint,NODE_ENV:'test'},
+  stdio:'ignore'
+ });
+ t.after(async()=>{
+  await new Promise(resolve=>{server.once('exit',resolve);server.kill();setTimeout(resolve,1500);});
+  rmSync(temp,{recursive:true,force:true,maxRetries:10,retryDelay:100});
+ });
+ let response;
+ for(let i=0;i<50;i++){
+  try {response=await fetch(`http://127.0.0.1:${port}/.well-known/assetlinks.json`);break;} catch {}
+  await new Promise(resolve=>setTimeout(resolve,100));
+ }
+ assert.ok(response,'server did not start');
+ assert.equal(response.status,200);
+ const [statement]=await response.json();
+ assert.deepEqual(statement.relation,['delegate_permission/common.handle_all_urls']);
+ assert.equal(statement.target.package_name,'com.unisatis.app');
+ assert.deepEqual(statement.target.sha256_cert_fingerprints,[fingerprint]);
+ const contact=await fetch(`http://127.0.0.1:${port}/api/public-contact`);
+ assert.equal(contact.status,200);
+ assert.deepEqual(await contact.json(),{email:'unisatis06@gmail.com'});
+ const deletionPage=await fetch(`http://127.0.0.1:${port}/delete-account.html`);
+ assert.equal(deletionPage.status,200);
+ assert.match(await deletionPage.text(),/unisatis06@gmail\.com/);
 });

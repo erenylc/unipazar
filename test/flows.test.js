@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -145,6 +145,12 @@ test('öğrenci pazarı ve Dayanışma akışları', async t => {
   assert.equal((await request(`/api/listings/${id}/favorite`,'POST',null,buyer)).status,200);
   assert.equal((await request('/api/favorites','GET',null,buyer)).data.listings[0].id,id);
   const conversation=await request(`/api/listings/${id}/conversation`,'POST',null,buyer); assert.equal(conversation.status,200);
+  assert.equal((await request(`/api/users/${seller.id}/block`,'POST',{},buyer)).status,200);
+  assert.equal((await request(`/api/conversations/${conversation.data.id}/messages`,'POST',{body:'Engelliyken mesaj'},buyer)).status,403);
+  assert.equal((await request(`/api/conversations/${conversation.data.id}/messages`,'POST',{body:'Engelliyken mesaj'},seller)).status,403);
+  assert.equal((await request(`/api/listings/${id}/conversation`,'POST',null,buyer)).status,403);
+  assert.equal((await request('/api/conversations','GET',null,buyer)).data.conversations.find(c=>c.id===conversation.data.id).blockedByMe,true);
+  assert.equal((await request(`/api/users/${seller.id}/block`,'DELETE',null,buyer)).status,200);
   const firstMessage=await request(`/api/conversations/${conversation.data.id}/messages`,'POST',{body:'Merhaba, ürün hâlâ mevcut mu?'},buyer);
   assert.equal(firstMessage.status,201);
   assert.equal((await request('/api/reports','POST',{messageId:firstMessage.data.id,reason:'Uygunsuz mesaj'},outsider)).status,404);
@@ -170,7 +176,8 @@ test('öğrenci pazarı ve Dayanışma akışları', async t => {
   assert.equal((await fetch(`${base}/api/messages/${sentPhoto.data.id}/photo`,{headers:{cookie:seller.cookie}})).status,200);
   assert.equal((await fetch(`${base}/api/messages/${sentPhoto.data.id}/photo`,{headers:{cookie:outsider.cookie}})).status,404);
   assert.equal((await fetch(`${base}/api/messages/${sentPhoto.data.id}/photo`)).status,401);
-  assert.ok((await request(`/api/conversations/${conversation.data.id}/messages`,'GET',null,seller)).data.messages.some(m=>m.id===sentPhoto.data.id && m.photo_filename));
+  const photoMessageFilename=(await request(`/api/conversations/${conversation.data.id}/messages`,'GET',null,seller)).data.messages.find(m=>m.id===sentPhoto.data.id)?.photo_filename;
+  assert.ok(photoMessageFilename);
   const voiceMessage=new FormData();voiceMessage.set('voice',new Blob([Uint8Array.from([0x1a,0x45,0xdf,0xa3,0x42,0x86,0x81,0x01])],{type:'audio/webm'}),'ses.webm');
   const sentVoice=await request(`/api/conversations/${conversation.data.id}/messages`,'POST',voiceMessage,buyer);
   assert.equal(sentVoice.status,201);
@@ -299,6 +306,26 @@ test('öğrenci pazarı ve Dayanışma akışları', async t => {
   assert.equal((await request('/api/login','POST',{email:'new-seller@example.com',password:'strong-password-123'})).status,200);
   const secondAdmin=spawnSync(process.execPath,['scripts/grant-admin.js','buyer@gmail.com'],{cwd:process.cwd(),env:{...process.env,DATA_DIR:path.join(temp,'data')},encoding:'utf8'});
   assert.notEqual(secondAdmin.status,0);
+  assert.equal((await request('/api/me','DELETE',{confirmation:'wrong'},buyer)).status,400);
+  assert.equal((await request('/api/me','DELETE',{confirmation:'SİL'},buyer)).status,200);
+  assert.equal((await request('/api/me','GET',null,buyer)).data.user,null);
+  assert.equal((await request('/api/login','POST',{email:'buyer@gmail.com',password:'strong-password-123'})).status,401);
+  const deletionDb=new DatabaseSync(path.join(temp,'data','unipazar.sqlite'));
+  assert.equal(deletionDb.prepare('SELECT 1 FROM users WHERE id=?').get(buyer.id),undefined);
+  assert.deepEqual(deletionDb.prepare('PRAGMA foreign_key_check').all(),[]);
+  deletionDb.close();
+  assert.equal(existsSync(path.join(temp,'data','message-photos',photoMessageFilename)),false);
+  const sellerLogin=await request('/api/login','POST',{email:'new-seller@example.com',password:'strong-password-123'},seller);
+  assert.equal(sellerLogin.status,200);
+  const sellerPhoto=new DatabaseSync(path.join(temp,'data','unipazar.sqlite'));
+  const sellerPhotoName=sellerPhoto.prepare('SELECT filename FROM listing_images WHERE listing_id=?').get(typoCreated.data.id)?.filename;
+  sellerPhoto.close();
+  assert.ok(sellerPhotoName);
+  assert.equal((await request('/api/me','DELETE',{confirmation:'SİL'},seller)).status,200);
+  assert.equal(existsSync(path.join(temp,'uploads',sellerPhotoName)),false);
+  const finalDb=new DatabaseSync(path.join(temp,'data','unipazar.sqlite'));
+  assert.deepEqual(finalDb.prepare('PRAGMA foreign_key_check').all(),[]);
+  finalDb.close();
 });
 
 test('yerel kayıt tüm alanları ister, hesabı açar ve girişe izin verir', async t => {

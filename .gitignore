@@ -12,6 +12,17 @@ coverage/
 !.env.example
 *.pem
 *.key
+*.keystore
+*.jks
+/android/.gradle/
+/android/.idea/
+/android/local.properties
+/android/app/build/
+/android/build/
+/android/*.apk
+/android/*.aab
+/android/*.idsig
+/android/signing-password.txt
 
 # Runtime data: accounts, sessions, messages, recordings and uploaded photos
 /data/
@@ -29,3 +40,5 @@ Thumbs.db
 .vscode/
 *.tmp
 *.bak
+
+/android/*.idsig
