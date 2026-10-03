@@ -1,5 +1,5 @@
 import {validateRegistration} from './public/registration-validation.js';
-import {brevoConfigured, sendBrevoVerificationCode} from './email-delivery.js';
+import {brevoConfigured, sendBrevoVerificationCode, sendBrevoTextEmail} from './email-delivery.js';
 import express from 'express';
 import multer from 'multer';
 import {preparePhoto, MAX_PHOTO_BYTES} from './image-upload.js';
@@ -113,6 +113,11 @@ CREATE TABLE IF NOT EXISTS registration_acceptances (
  user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
  version TEXT NOT NULL, documents TEXT NOT NULL, accepted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS password_reset_codes (
+ user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+ code_hash TEXT NOT NULL, expires_at INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
+ requested_at INTEGER NOT NULL
+);
 `);
 if (!db.prepare("PRAGMA table_info(users)").all().some(column => column.name === 'need_expires_at')) {
   db.exec('ALTER TABLE users ADD COLUMN need_expires_at INTEGER');
@@ -189,6 +194,7 @@ function authLimit(req,res,next){
   next();
 }
 app.use(['/api/register','/api/login','/api/verify-email','/api/resend-code','/api/me/email','/api/me/phone','/api/me/verify-email'],authLimit);
+app.use(['/api/password-reset/request','/api/password-reset/confirm'],authLimit);
 
 const hash = value => createHash('sha256').update(value).digest('hex');
 const legal = legalDocuments();
@@ -337,6 +343,52 @@ app.post('/api/login', wrap(async (req, res) => {
   if (user.closed_at) return fail(res, 403, 'Bu hesap kapatılmış. Destek ile iletişime geç.');
   setSession(res, user.id, req.body.rememberMe === true);
   res.json({ user: publicUser(user) });
+}));
+app.post('/api/password-reset/request',wrap(async(req,res)=>{
+  if(!emailVerificationAvailable())return fail(res,503,'Şifre yenileme servisine şu anda ulaşılamıyor. Daha sonra tekrar dene.');
+  const email=clean(req.body.email,160).toLowerCase();
+  if(!/^\S+@[^\s@]+\.[^\s@]+$/.test(email))return fail(res,400,'Geçerli bir e-posta adresi gir.');
+  const message='Bu e-posta ile bir hesap varsa şifre yenileme kodu gönderildi.';
+  const user=db.prepare('SELECT * FROM users WHERE email=? AND closed_at IS NULL').get(email);
+  if(!user)return res.json({message});
+  const previous=db.prepare('SELECT requested_at FROM password_reset_codes WHERE user_id=?').get(user.id);
+  if(previous && previous.requested_at>Date.now()-60000)return res.json({message});
+  const code=randomCode();
+  db.prepare('INSERT OR REPLACE INTO password_reset_codes(user_id,code_hash,expires_at,requested_at) VALUES(?,?,?,?)').run(user.id,hash(code),Date.now()+15*60000,Date.now());
+  const subject='Üni Satış şifre yenileme kodu';
+  const text=`Şifre yenileme kodun: ${code}. Kod 15 dakika geçerlidir. Bu işlemi sen istemediysen bu e-postayı dikkate alma. Kodunu kimseyle paylaşma.`;
+  try{
+    if(brevoConfigured())await sendBrevoTextEmail(email,subject,text);
+    else if(mailer)await mailer.sendMail({from:process.env.SMTP_FROM,to:email,subject,text});
+  }catch{
+    db.prepare('DELETE FROM password_reset_codes WHERE user_id=?').run(user.id);
+    // The public response is identical for existing and unknown accounts.
+    console.error('Password reset email delivery failed');
+  }
+  res.set('Cache-Control','no-store').json({message,...(testEmailCodes?{devCode:code}:{})});
+}));
+app.post('/api/password-reset/confirm',wrap(async(req,res)=>{
+  const email=clean(req.body.email,160).toLowerCase(),code=clean(req.body.code,10),password=String(req.body.password||'');
+  if(password.length<6 || !password.trim())return fail(res,400,'Yeni şifren en az 6 karakter olmalı.');
+  if(password.length>256)return fail(res,400,'Şifren en fazla 256 karakter olabilir.');
+  const user=db.prepare('SELECT * FROM users WHERE email=? AND closed_at IS NULL').get(email);
+  const record=user && db.prepare('SELECT * FROM password_reset_codes WHERE user_id=?').get(user.id);
+  if(!record || record.expires_at<Date.now() || record.attempts>=5 || !/^[0-9]{6}$/.test(code) || record.code_hash!==hash(code)){
+    if(record)db.prepare('UPDATE password_reset_codes SET attempts=attempts+1 WHERE user_id=?').run(user.id);
+    return fail(res,400,'Kod geçersiz veya süresi dolmuş. Yeni kod iste.');
+  }
+  const storedPassword=await passwordHash(password);
+  let changed=false;
+  transaction(()=>{
+    const consumed=db.prepare('DELETE FROM password_reset_codes WHERE user_id=? AND code_hash=? AND expires_at>? AND attempts<5').run(user.id,hash(code),Date.now());
+    if(!consumed.changes)return;
+    const updated=db.prepare('UPDATE users SET password_hash=? WHERE id=? AND closed_at IS NULL').run(storedPassword,user.id);
+    if(!updated.changes)return;
+    db.prepare('DELETE FROM sessions WHERE user_id=?').run(user.id);
+    changed=true;
+  });
+  if(!changed)return fail(res,400,'Kod kullanılmış veya süresi dolmuş. Yeni kod iste.');
+  res.json({message:'Şifren yenilendi. Yeni şifrenle giriş yapabilirsin.'});
 }));
 app.post('/api/logout', (req, res) => {
   const token = /(?:^|; )up_session=([^;]+)/.exec(req.headers.cookie || '')?.[1];

@@ -1,0 +1,46 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {spawn} from 'node:child_process';
+import {mkdtempSync,rmSync} from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {DatabaseSync} from 'node:sqlite';
+test('password reset codes expire, lock after failed attempts, cannot replay and revoke sessions',async t=>{
+ const temp=mkdtempSync(path.join(os.tmpdir(),'unipazar-reset-'));
+ const port=34000+Math.floor(Math.random()*1000),base=`http://127.0.0.1:${port}`;
+ const server=spawn(process.execPath,['server.js'],{env:{...process.env,PORT:String(port),DATA_DIR:path.join(temp,'data'),UPLOAD_DIR:path.join(temp,'uploads'),NODE_ENV:'test',TEST_EMAIL_CODES:'1',BREVO_API_KEY:'',BREVO_FROM:'',SMTP_HOST:'',SMTP_FROM:'',LEGAL_ENABLED:''},stdio:'ignore'});
+ t.after(async()=>{await new Promise(resolve=>{server.once('exit',resolve);server.kill();setTimeout(resolve,1500);});rmSync(temp,{recursive:true,force:true,maxRetries:10,retryDelay:100});});
+ for(let i=0;i<50;i++){try{if((await fetch(base+'/api/me')).ok)break;}catch{}await new Promise(resolve=>setTimeout(resolve,100));}
+ async function request(url,method='GET',body,user){
+  const res=await fetch(base+url,{method,headers:{...(body?{'content-type':'application/json'}:{}),...(user?.cookie?{cookie:user.cookie}:{})},body:body?JSON.stringify(body):undefined});
+  return {status:res.status,data:await res.json(),cookie:res.headers.get('set-cookie')?.split(';')[0]};
+ }
+ const registered=await request('/api/register','POST',{name:'Reset Test',email:'new-seller@example.com',password:'strong-password-123',phone:'05551234567',university:'Munzur Üniversitesi'});
+ assert.equal(registered.status,201);
+
+  const resetLogin=await request('/api/login','POST',{email:'new-seller@example.com',password:'strong-password-123'});
+  const resetSession={cookie:resetLogin.cookie};
+  const unknownReset=await request('/api/password-reset/request','POST',{email:'unknown@example.com'});
+  const reset=await request('/api/password-reset/request','POST',{email:'new-seller@example.com'});
+  assert.equal(reset.status,200);
+  assert.equal(reset.data.message,unknownReset.data.message);
+  assert.match(reset.data.devCode,/^\d{6}$/);
+  assert.equal((await request('/api/password-reset/confirm','POST',{email:'new-seller@example.com',code:'invalid',password:'abcdef'})).status,400);
+  assert.equal((await request('/api/password-reset/confirm','POST',{email:'new-seller@example.com',code:reset.data.devCode,password:'short'})).status,400);
+  assert.equal((await request('/api/password-reset/confirm','POST',{email:'new-seller@example.com',code:reset.data.devCode,password:'abcdef'})).status,200);
+  assert.equal((await request('/api/me','GET',null,resetSession)).data.user,null);
+  assert.equal((await request('/api/password-reset/confirm','POST',{email:'new-seller@example.com',code:reset.data.devCode,password:'ghijkl'})).status,400);
+  assert.equal((await request('/api/login','POST',{email:'new-seller@example.com',password:'strong-password-123'})).status,401);
+  assert.equal((await request('/api/login','POST',{email:'new-seller@example.com',password:'abcdef'})).status,200);
+ const resetDb=new DatabaseSync(path.join(temp,'data','unipazar.sqlite'));
+ const userId=resetDb.prepare('SELECT id FROM users WHERE email=?').get('new-seller@example.com').id;
+ const renew=async()=>{resetDb.prepare('DELETE FROM password_reset_codes WHERE user_id=?').run(userId);return request('/api/password-reset/request','POST',{email:'new-seller@example.com'});};
+ const expired=await renew();
+ resetDb.prepare('UPDATE password_reset_codes SET expires_at=0 WHERE user_id=?').run(userId);
+ assert.equal((await request('/api/password-reset/confirm','POST',{email:'new-seller@example.com',code:expired.data.devCode,password:'ghijkl'})).status,400);
+ const locked=await renew();
+ for(let i=0;i<5;i++)assert.equal((await request('/api/password-reset/confirm','POST',{email:'new-seller@example.com',code:'invalid',password:'ghijkl'})).status,400);
+ assert.equal((await request('/api/password-reset/confirm','POST',{email:'new-seller@example.com',code:locked.data.devCode,password:'ghijkl'})).status,400);
+ resetDb.close();
+});
+
