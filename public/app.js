@@ -394,7 +394,7 @@ async function setupGoogleSignIn(){
  window.google.accounts.id.initialize({client_id:state.googleClientId,nonce:challenge.nonce,auto_select:false,button_auto_select:false,callback:async(response)=>{
   try{
    const result=await api('/api/auth/google',{method:'POST',body:{credential:response.credential}});
-   if(result.user){state.user=result.user;state.googleProfile=null;connectMessageStream();closeModal();await refreshUnread();return render();}
+   if(result.user){state.user=result.user;state.googleProfile=null;connectMessageStream();closeModal();refreshUnread().catch(()=>{});return render();}
    state.googleProfile=result.profile;state.authTab='register';drawModal();
   }catch(error){toast(error.message);if(state.modal==='auth')drawModal();}
  }});

@@ -277,11 +277,16 @@ app.post('/api/auth/google',authLimit,wrap(async(req,res)=>{
   let user=db.prepare('SELECT u.* FROM google_accounts g JOIN users u ON u.id=g.user_id WHERE g.sub=?').get(profile.sub);
   if(!user){
     user=db.prepare('SELECT * FROM users WHERE email=?').get(profile.email);
-    if(user && (!profile.authoritative || !user.email_verified))return fail(res,409,'Bu e-posta ile bir hesap var. E-posta ve şifrenle giriş yap.');
+    if(user && !profile.authoritative)return fail(res,409,'Bu e-posta ile bir hesap var. E-posta ve şifrenle giriş yap.');
     if(user && !user.closed_at)db.prepare('INSERT INTO google_accounts(sub,user_id) VALUES(?,?)').run(profile.sub,user.id);
   }
   if(user){
     if(user.closed_at)return fail(res,403,'Bu hesap kapatılmış.');
+    if(!user.email_verified && profile.authoritative && user.email===profile.email){
+      db.prepare('UPDATE users SET email_verified=1 WHERE id=?').run(user.id);
+      db.prepare('DELETE FROM verification_codes WHERE user_id=?').run(user.id);
+      user={...user,email_verified:1};
+    }
     setSession(res,user.id);return res.json({user:publicUser(user)});
   }
   const token=randomBytes(32).toString('hex');googleSignups.set(hash(token),{...profile,expires:Date.now()+10*60000});temporaryCookie(res,'up_google_signup',token);
