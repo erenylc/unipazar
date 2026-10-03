@@ -391,14 +391,14 @@ async function setupGoogleSignIn(){
  });
  const [,challenge]=await Promise.all([googleScriptRequest,api('/api/auth/google/nonce')]);
  if(!button?.isConnected)return;
- window.google.accounts.id.initialize({client_id:state.googleClientId,nonce:challenge.nonce,auto_select:false,callback:async(response)=>{
+ window.google.accounts.id.initialize({client_id:state.googleClientId,nonce:challenge.nonce,auto_select:false,button_auto_select:false,callback:async(response)=>{
   try{
    const result=await api('/api/auth/google',{method:'POST',body:{credential:response.credential}});
    if(result.user){state.user=result.user;state.googleProfile=null;connectMessageStream();closeModal();await refreshUnread();return render();}
    state.googleProfile=result.profile;state.authTab='register';drawModal();
   }catch(error){toast(error.message);if(state.modal==='auth')drawModal();}
  }});
- window.google.accounts.id.renderButton(button,{type:'standard',theme:'outline',size:'large',shape:'pill',width:Math.min(400,Math.floor(button.parentElement.clientWidth)),text:'continue_with',logo_alignment:'left',locale:'tr'});
+ window.google.accounts.id.renderButton(button,{type:'standard',theme:'outline',size:'medium',shape:'rectangular',width:Math.min(400,Math.floor(button.parentElement.clientWidth)),text:'continue_with',logo_alignment:'left',locale:'tr'});
  $('#googleSignInStatus').textContent='';
 }
 function registrationValidation(values){
