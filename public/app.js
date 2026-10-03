@@ -567,7 +567,7 @@ document.addEventListener('click',async event=>{
    }
    if(action==='login-required') return showAuth();
    if(action==='choose-university'){
-    showSimpleModal('Üniversite seç','Bu seçim yalnızca hangi üniversitenin ilanlarını gördüğünü değiştirir.',state.universities.length?universityPickerForm():'<p class="muted" role="status">Üniversiteler yükleniyor…</p>');
+    showSimpleModal('Üniversite seç','İlanlarını görmek istediğin üniversiteyi seç.',state.universities.length?universityPickerForm():'<p class="muted" role="status">Üniversiteler yükleniyor…</p>');
     const picker=state.modal;
     if(!state.universities.length){
      try{await loadUniversities();}catch(error){if(state.modal===picker)closeModal();throw error;}
