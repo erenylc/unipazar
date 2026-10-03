@@ -291,7 +291,7 @@ app.get('/api/universities', (_req, res) => res.json({ universities, emailVerifi
 app.post('/api/register', wrap(async (req, res) => {
   const signupKey=hash(cookieValue(req,'up_google_signup') || ''),googleProfile=req.body.google===true ? googleSignups.get(signupKey) : null;
   if(req.body.google===true && (!googleProfile || googleProfile.expires<Date.now()))return fail(res,400,'Google kaydının süresi doldu. Google ile tekrar devam et.');
-  const validation=validateRegistration(googleProfile ? {...req.body,email:googleProfile.email} : req.body, [...universityNames],{passwordRequired:!googleProfile});
+  const validation=validateRegistration(googleProfile ? {...req.body,email:googleProfile.email} : req.body, [...universityNames],{passwordRequired:!googleProfile,phoneRequired:!googleProfile});
   Object.assign(validation.fields,validateLegalAcceptance(req.body,legal));
   if(Object.keys(validation.fields).length)return res.status(400).json({error:'Lütfen işaretli alanları kontrol et.',fields:validation.fields});
   const {name,email,university,password,phone}=validation.values;
@@ -430,7 +430,7 @@ app.patch('/api/me/email', wrap(async (req, res) => {
 }));
 app.patch('/api/me/phone', wrap(async (req, res) => {
   const user = requireUser(req,res); if (!user) return;
-  if (!await verifyPassword(String(req.body.password || ''),user.password_hash)) return fail(res,403,'Mevcut şifreni doğru gir.');
+  if (user.phone && !await verifyPassword(String(req.body.password || ''),user.password_hash)) return fail(res,403,'Mevcut şifreni doğru gir.');
   const phone = clean(req.body.phone,20).replace(/\s/g,'');
   if (!/^(?:\+90|0)?5\d{9}$/.test(phone)) return fail(res,400,'Geçerli bir cep telefonu numarası gir.');
   db.prepare('UPDATE users SET phone=? WHERE id=?').run(phone,user.id);
@@ -532,7 +532,11 @@ app.get('/api/sellers/:id/listings', (req, res) => {
 });
 const upload = multer({ storage: multer.memoryStorage(), limits: { files: 6, fileSize: MAX_PHOTO_BYTES } });
 const voiceType = buffer => buffer.subarray(0,4).equals(Buffer.from([0x1a,0x45,0xdf,0xa3])) ? 'webm' : buffer.subarray(0,4).toString() === 'OggS' ? 'ogg' : buffer.length >= 12 && buffer.subarray(4,8).toString() === 'ftyp' ? 'mp4' : null;
-app.post('/api/listings', upload.array('photos',6), async (req, res) => {
+app.post('/api/listings', (req,res,next)=>{
+  const user=requireUser(req,res);if(!user)return;
+  if(!user.phone)return res.status(400).json({error:'İlan vermek için telefon numaranı eklemelisin.',fields:{phone:'Telefon numaranı ekle.'}});
+  next();
+}, upload.array('photos',6), async (req, res) => {
   const user = requireUser(req,res); if (!user) return;
   const kind = clean(req.body.kind), title = clean(req.body.title,100), description = clean(req.body.description,2000), category = clean(req.body.category,60), condition = clean(req.body.condition,40);
   const priceText = String(req.body.price ?? '');

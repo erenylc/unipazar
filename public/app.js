@@ -130,6 +130,7 @@ async function renderDetail(id){
 }
 function renderSell(kind='sale'){
  if(!state.user){ showAuth(); return; }
+ if(!ensureSellingPhone())return;
  selectedListingPhotos=[];
  pageFrame(`<main class="shell page" style="max-width:850px"><div class="section-head"><div><h2>${kind==='donation'?'Ücretsiz ürün paylaş':'Yeni ilan ver'}</h2><p>İlanın kendi üniversitendeki öğrencilere gösterilir.${kind==='donation'?' Paylaştığın bir eşya, başka bir öğrencinin hayatını kolaylaştırabilir.':''}</p></div></div><form class="panel" data-form="listing" enctype="multipart/form-data"><input type="hidden" name="kind" value="${kind}"><p class="status">${kind==='donation'?'Ücretsiz ürün':'İkinci el satış'}</p><div class="field"><label for="title">Ürün adı</label><input name="title" id="title" maxlength="100" required placeholder="Örn. İktisat 101 ders kitabı"></div><div class="form-grid"><div class="field"><label for="category">Kategori</label><select name="category" id="category" required><option value="">Kategori seç</option>${categories.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('')}</select></div><div class="field"><label for="condition">Durumu</label><select name="condition" id="condition" required><option value="">Durum seç</option><option value="Yeni">Yeni</option><option value="Az kullanılmış">Az kullanılmış</option><option value="Kullanılmış">Kullanılmış</option><option value="Onarım gerektirir">Onarım gerektirir</option></select></div></div><div class="field" id="priceField" ${kind==='donation'?'hidden':''}><label for="price">Fiyat (₺)</label><input name="price" id="price" type="text" inputmode="numeric" pattern="[0-9]+" maxlength="9" ${kind==='sale'?'required':''} placeholder="0"></div><div class="field"><label for="description">Açıklama</label><textarea name="description" id="description" maxlength="2000" required placeholder="Ürünün özelliklerini ve varsa kusurlarını açıkça yaz."></textarea></div><div class="field"><label for="photos">Fotoğraflar</label><label class="photo-picker" for="photos"><span class="photo-picker-icon">＋</span><span><strong>Fotoğraf ekle</strong><small id="photoCount">Henüz fotoğraf seçilmedi</small></span><input name="photos" id="photos" type="file" accept="image/*,.heic,.heif" multiple></label><span class="hint">En çok 6 fotoğraf; her biri en fazla 12 MB. İlk fotoğraf kapak olur.</span></div><div class="inline-actions"><button class="btn btn-primary" type="submit">İlanı yayınla</button><button class="btn btn-light" type="button" data-action="cancel-listing">Vazgeç</button></div></form></main>`,'/sell');
 }
@@ -160,8 +161,14 @@ function ownListingCard(item){
  const free=item.kind==='donation';
  return `<article class="card"><a class="card-image" href="#/listing/${item.id}">${item.cover?`<img src="/uploads/${encodeURIComponent(item.cover)}" alt="${escapeHtml(item.title)}" loading="lazy">`:'<div class="placeholder">Fotoğraf yok</div>'}<span class="badge ${free?'free':''}">${free?'Ücretsiz':'İkinci el'}</span></a><div class="card-body"><a href="#/listing/${item.id}"><h3>${escapeHtml(item.title)}</h3></a><div class="price">${free?'Ücretsiz':money(item.price)}</div><div class="meta">${escapeHtml(item.university)} · ${escapeHtml(item.condition)} · ${item.status==='active'?'Yayında':'Ayrıldı'}</div><button class="btn btn-outline" data-action="edit-listing" data-id="${item.id}" style="margin-top:12px">Düzenle</button></div></article>`;
 }
+function ensureSellingPhone(){
+ if(state.user.phone)return true;
+ pageFrame(`<main class="shell page narrow-page"><section class="panel"><h2>Telefon numaranı ekle</h2><p>İlan vermek için telefon bilgilerini tamamlaman gerekiyor.</p><button class="btn btn-primary" data-action="change-phone">Telefon numarası ekle</button><a class="btn btn-light" href="#/">İlanlara dön</a></section></main>`,'/sell');
+ return false;
+}
 function renderSellChoice(){
  if(!state.user){showAuth();return;}
+ if(!ensureSellingPhone())return;
  pageFrame(`<main class="shell page narrow-page"><div class="section-head"><div><h2>Nasıl ilan vermek istersin?</h2><p>${escapeHtml(state.user.university)} öğrencileri için bir seçenek seç.</p></div></div><div class="choice-grid"><a class="choice-card" href="#/sell-sale"><span class="choice-icon">↗</span><h3>İkinci el satış</h3><p>Ürününe fiyat belirle ve üniversitendeki öğrencilere satışa çıkar.</p><strong>Satılık ilan ver →</strong></a><a class="choice-card choice-free" href="#/sell-donation"><span class="choice-icon">♡</span><h3>Ücretsiz ürün ver</h3><p>Kullanmadığın eşyayı desteğe ihtiyacı olan bir öğrenciye ücretsiz ver.</p><strong>Dayanışma ilanı ver →</strong></a></div></main>`,'/sell');
 }
 async function renderListingsDashboard(){
@@ -391,11 +398,11 @@ async function setupGoogleSignIn(){
    state.googleProfile=result.profile;state.authTab='register';drawModal();
   }catch(error){toast(error.message);if(state.modal==='auth')drawModal();}
  }});
- window.google.accounts.id.renderButton(button,{type:'standard',theme:'outline',size:'large',text:'continue_with',locale:'tr'});
+ window.google.accounts.id.renderButton(button,{type:'standard',theme:'outline',size:'large',shape:'pill',width:Math.min(400,Math.floor(button.parentElement.clientWidth)),text:'continue_with',logo_alignment:'left',locale:'tr'});
  $('#googleSignInStatus').textContent='';
 }
 function registrationValidation(values){
- const validation=validateRegistration(values,state.universities,{passwordRequired:!state.googleProfile});
+ const validation=validateRegistration(values,state.universities,{passwordRequired:!state.googleProfile,phoneRequired:!state.googleProfile});
  if(state.legalVersion){
   if(values.termsAccepted!=='true')validation.fields.termsAccepted='Üyelik sözleşmesini kabul etmelisin.';
   if(values.privacyRead!=='true')validation.fields.privacyRead='KVKK aydınlatma metnini okuyup anladığını belirt.';
@@ -422,7 +429,10 @@ function setupRegistrationForm(){
  if(state.googleProfile){
   form.elements.name.value=state.googleProfile.name;form.elements.email.value=state.googleProfile.email;form.elements.email.readOnly=true;
   form.elements.password.closest('.field').remove();
-  form.querySelector('.registration-alert').insertAdjacentHTML('afterend','<p class="google-profile-note">Google hesabın doğrulandı. Üniversiteni ve telefon numaranı tamamla.</p>');
+  form.elements.phone.required=false;
+  form.elements.phone.closest('.field').querySelector('label').textContent='Telefon numaran (isteğe bağlı)';
+  form.elements.phone.closest('.field').insertAdjacentHTML('beforeend','<span class="hint">İlan vermek istediğinde telefon numaranı ekleyebilirsin.</span>');
+  form.querySelector('.registration-alert').insertAdjacentHTML('afterend','<p class="google-profile-note">Adın ve e-postan Google hesabından alındı. Üniversiteni seç, üyelik ve KVKK kutularını işaretleyerek hesabını oluştur.</p>');
  }
  if(state.legalVersion){
   form.querySelector('button:not([type])').insertAdjacentHTML('beforebegin',`<div class="registration-legal"><input type="hidden" name="legalVersion" value="${escapeHtml(state.legalVersion)}"><div class="field"><label class="legal-check"><input name="termsAccepted" type="checkbox" value="true"><span><a href="/legal/terms" target="_blank" rel="noopener">Üyelik Sözleşmesi</a>’ni okudum ve kabul ediyorum.</span></label></div><div class="field"><label class="legal-check"><input name="privacyRead" type="checkbox" value="true"><span><a href="/legal/privacy" target="_blank" rel="noopener">KVKK Aydınlatma Metni</a>’ni okudum ve anladım.</span></label></div></div>`);
@@ -600,7 +610,7 @@ document.addEventListener('click',async event=>{
    if(action==='cancel-listing'){localStorage.removeItem('unipazar-listing-draft');selectedListingPhotos=[];const form=target.closest('[data-form="listing"]');form?.reset();go('/');return;}
    if(action==='account'){ if(!state.user)return showAuth(); const menu=$('.profile-menu'); menu.hidden=!menu.hidden; target.setAttribute('aria-expanded',String(!menu.hidden)); return; }
    if(action==='change-email') return showSimpleModal('E-postamı değiştir','Yeni e-postanı doğrulaman gerekecek.',`<form data-form="change-email"><div class="field"><label>Yeni e-posta</label><input name="email" type="email" required></div><div class="field"><label>Mevcut şifren</label><input name="password" type="password" autocomplete="current-password" required></div><button class="btn btn-primary">E-postayı değiştir</button></form>`);
-   if(action==='change-phone') return showSimpleModal('Telefon numaramı değiştir','Numaran yalnızca hesap bilgilerinde görünür.',`<form data-form="change-phone"><div class="field"><label>Yeni telefon numarası</label><input name="phone" type="tel" placeholder="05xx xxx xx xx" required></div><div class="field"><label>Mevcut şifren</label><input name="password" type="password" autocomplete="current-password" required></div><button class="btn btn-primary">Numarayı kaydet</button></form>`);
+   if(action==='change-phone') return showSimpleModal(state.user.phone?'Telefon numaramı değiştir':'Telefon numarası ekle','Numaran yalnızca hesap bilgilerinde görünür.',`<form data-form="change-phone"><div class="field"><label>Telefon numarası</label><input name="phone" type="tel" autocomplete="tel" placeholder="05xx xxx xx xx" required></div>${state.user.phone?'<div class="field"><label>Mevcut şifren</label><input name="password" type="password" autocomplete="current-password" required></div>':''}<button class="btn btn-primary">Numarayı kaydet</button></form>`);
    if(action==='logout'){await api('/api/logout',{method:'POST'});state.user=null;connectMessageStream();state.unreadCount=0;state.filters.university='';go('/');toast('Çıkış yapıldı.');return render();}
    if(!state.user){showAuth();return;}
    if(action==='favorite'){
