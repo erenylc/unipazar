@@ -104,3 +104,10 @@ html{scrollbar-gutter:stable}body,.topbar,.panel,.card,.donation-banner{transiti
 .install-page{max-width:650px;padding-top:32px;padding-bottom:calc(32px + env(safe-area-inset-bottom))}.install-card{margin-top:24px;padding:28px}.install-logo{border-radius:24px}.install-card h1{font-size:clamp(24px,5vw,32px);line-height:1.2}.install-card p{line-height:1.6}.install-guide h2{font-size:19px;margin-top:26px}.install-entry{font-weight:700;text-decoration:underline;white-space:nowrap}#install-button[hidden]{display:none}@media(display-mode:standalone){.install-entry{display:none}.topbar{padding-top:env(safe-area-inset-top)}}
 
 #googleSignIn{max-width:100%;overflow:hidden;border-radius:8px}#googleSignIn:focus-within{outline:2px solid #8a76c8;outline-offset:3px}
+
+/* Keep header actions on one line; move navigation to its own row on tablets. */
+.top-actions{flex-shrink:0}.top-actions>.btn{flex-shrink:0;white-space:nowrap;height:42px}
+@media(min-width:701px) and (max-width:1100px){.top-inner{height:auto;min-height:76px;flex-wrap:wrap;gap:12px;padding-top:12px;padding-bottom:10px}.top-spacer{display:none}.top-actions{margin-left:auto}.top-inner>.nav{order:3;flex-basis:100%;margin-left:0;justify-content:center;gap:18px}.nav a{white-space:nowrap}}
+.profile-summary span{font-size:14px;line-height:1.5;font-weight:600}.profile-summary small{font-size:13px;line-height:1.5}
+html[data-theme=dark] .profile-summary span{color:#ded9ee}html[data-theme=dark] .profile-summary small{color:#c7c3d8}html[data-theme=dark] .chat-person-link{color:#f1eaff}html[data-theme=dark] .chat-header{border-color:#45445d}html[data-theme=dark] .chat-header small,html[data-theme=dark] .chat-item small{color:#cbc8df}
+.messages{background:#f8f5ef url('/chat-antique-pattern.svg') repeat;background-size:360px 300px}html[data-theme=dark] .messages{background:#202234 url('/chat-antique-pattern.svg') repeat;background-size:360px 300px}
