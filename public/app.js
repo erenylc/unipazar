@@ -333,6 +333,15 @@ function drawModal(){
  $('#modal-root')?.remove(); if(html) document.body.insertAdjacentHTML('beforeend',`<div id="modal-root">${html}</div>`);
  if(html)applyLocale($('#modal-root'),language);
  setupRegistrationForm();
+ if(state.modal==='auth' && state.authTab==='register'){
+  $('#modal-root .field input[name="phone"]')?.parentElement.querySelector('.hint')?.remove();
+  const passwordHint=$('#modal-root .field input[name="password"]')?.parentElement.querySelector('.hint');
+  if(passwordHint)passwordHint.textContent='En az 6 karakter.';
+ }
+ if(state.modal==='auth' && state.authTab==='login'){
+  const login=$('#modal-root [data-form="login"]');
+  if(login && !login.querySelector('[data-action="forgot-password"]')) login.querySelector('button[type="submit"],button:not([data-action])')?.insertAdjacentHTML('afterend','<button type="button" class="btn btn-light" style="width:100%;margin-top:8px" data-action="forgot-password">Şifremi unuttum</button>');
+ }
  if(state.modal==='auth' && state.authTab!=='verify' && !state.googleProfile && state.googleClientId){
   $('.auth-tabs').insertAdjacentHTML('afterend','<div class="google-auth"><div id="googleSignIn"></div><p class="hint" id="googleSignInStatus" role="status">Google ile giriş yükleniyor…</p></div>');
   setupGoogleSignIn().catch(()=>{const status=$('#googleSignInStatus');if(status)status.textContent='Google ile giriş yüklenemedi. E-posta ile devam edebilirsin.';});
@@ -508,6 +517,7 @@ document.addEventListener('click',async event=>{
  if(target){event.preventDefault(); const action=target.dataset.action,id=target.dataset.id;
   try{
    if(action==='close-modal') return closeModal();
+   if(action==='forgot-password') return showSimpleModal('Şifremi unuttum','E-posta adresini ve hesabına kayıtlı telefon numaranı girersen, şifre yenileme bağlantısı için destek ekibine başvurabilirsin.',`<p class="muted">Şifre yenileme altyapısı güvenli e-posta servisi yapılandırıldığında etkinleşecek.</p><a class="btn btn-primary" href="mailto:merenyalcin06@gmail.com">Destek e-postası gönder</a>`);
    if(action==='photo-menu'){discardVoiceRecording();state.modal='camera';drawModal();return;}
    if(action==='edit-message')return showSimpleModal('Mesajı düzenle','',`<form data-form="edit-message" data-id="${id}"><textarea name="body" maxlength="2000" required>${escapeHtml(target.dataset.body)}</textarea><button class="btn btn-primary">Kaydet</button></form>`);
    if(action==='delete-message'){await api('/api/messages/'+id,{method:'DELETE'});return renderMessages();}

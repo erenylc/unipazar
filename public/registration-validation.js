@@ -13,7 +13,7 @@ export function validateRegistration(values, universities, options={}){
  else if(!/^(?:\+90|0)?5\d{9}$/.test(phone))fields.phone='Geçerli bir cep telefonu numarası gir (05xx xxx xx xx).';
  if(options.passwordRequired!==false){
   if(!password)fields.password='Şifreni gir.';
-  else if(password.length<10||!password.trim())fields.password='Şifren en az 10 karakter olmalı.';
+  else if(password.length<6||!password.trim())fields.password='Şifren en az 6 karakter olmalı.';
  }
  return {fields,values:{name,email,university,password,phone}};
 }
