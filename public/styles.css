@@ -100,3 +100,5 @@ html{scrollbar-gutter:stable}body,.topbar,.panel,.card,.donation-banner{transiti
  html[data-theme=dark] .mobile-nav a.active{background:#3b3455;color:#f0eaff}
  html[data-theme=dark] .mobile-nav .message-badge{border-color:#242638}
 }
+
+.install-page{max-width:650px;padding-top:32px;padding-bottom:calc(32px + env(safe-area-inset-bottom))}.install-card{margin-top:24px;padding:28px}.install-logo{border-radius:24px}.install-card h1{font-size:clamp(24px,5vw,32px);line-height:1.2}.install-card p{line-height:1.6}.install-guide h2{font-size:19px;margin-top:26px}.install-entry{font-weight:700;text-decoration:underline;white-space:nowrap}#install-button[hidden]{display:none}@media(display-mode:standalone){.install-entry{display:none}.topbar{padding-top:env(safe-area-inset-top)}}
