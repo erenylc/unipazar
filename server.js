@@ -3,6 +3,8 @@ import {brevoConfigured, sendBrevoVerificationCode} from './email-delivery.js';
 import express from 'express';
 import multer from 'multer';
 import {preparePhoto, MAX_PHOTO_BYTES} from './image-upload.js';
+import {legalDocuments, validateLegalAcceptance} from './legal-documents.js';
+import {verifyGoogleCredential} from './google-login.js';
 import nodemailer from 'nodemailer';
 import { DatabaseSync } from 'node:sqlite';
 import { randomBytes, randomInt, scrypt as scryptCallback, timingSafeEqual, createHash } from 'node:crypto';
@@ -104,6 +106,13 @@ CREATE TABLE IF NOT EXISTS support_applications (
 );
 CREATE INDEX IF NOT EXISTS listings_scope ON listings(university,campus,status,created_at);
 CREATE INDEX IF NOT EXISTS messages_conversation ON messages(conversation_id,id);
+CREATE TABLE IF NOT EXISTS google_accounts (
+ sub TEXT PRIMARY KEY, user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS registration_acceptances (
+ user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+ version TEXT NOT NULL, documents TEXT NOT NULL, accepted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 `);
 if (!db.prepare("PRAGMA table_info(users)").all().some(column => column.name === 'need_expires_at')) {
   db.exec('ALTER TABLE users ADD COLUMN need_expires_at INTEGER');
@@ -162,6 +171,7 @@ app.use(express.json({ limit: '100kb' }));
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
   if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
     const origin = req.get('origin');
     if (origin && origin !== `${req.protocol}://${req.get('host')}`) return res.status(403).json({ error: 'Geçersiz istek kaynağı.' });
@@ -181,6 +191,13 @@ function authLimit(req,res,next){
 app.use(['/api/register','/api/login','/api/verify-email','/api/resend-code','/api/me/email','/api/me/phone','/api/me/verify-email'],authLimit);
 
 const hash = value => createHash('sha256').update(value).digest('hex');
+const legal = legalDocuments();
+const googleClientId = process.env.GOOGLE_CLIENT_ID || '';
+const googleChallenges = new Map(), googleSignups = new Map();
+const cookieValue = (req,name) => req.headers.cookie?.split(';').map(value=>value.trim()).find(value=>value.startsWith(name+'='))?.slice(name.length+1);
+const temporaryCookie = (res,name,value) => res.cookie(name,value,{httpOnly:true,sameSite:'strict',secure:!dev,path:'/api',maxAge:10*60000});
+setInterval(()=>{for(const store of [googleChallenges,googleSignups])for(const [key,value] of store)if(value.expires<Date.now())store.delete(key);},60000).unref();
+function recordAcceptance(userId){if(legal)db.prepare('INSERT INTO registration_acceptances(user_id,version,documents) VALUES(?,?,?)').run(userId,legal.version,JSON.stringify(legal));}
 const clean = (value, max = 200) => String(value ?? '').trim().slice(0, max);
 const randomCode = () => String(randomInt(100000, 1000000));
 const passwordHash = async password => {
@@ -231,18 +248,60 @@ const issueCode = async user => {
   return testEmailCodes ? code : undefined;
 };
 
-app.get('/api/me', (req, res) => res.json({ user: publicUser(currentUser(req)),emailVerificationAvailable:emailVerificationAvailable() }));
+app.get('/api/me', (req, res) => {res.set('Cache-Control','no-store');res.json({ user: publicUser(currentUser(req)),emailVerificationAvailable:emailVerificationAvailable(),googleClientId,legalVersion:legal?.version || null });});
+app.get('/legal/:document', (req,res)=>{
+  const document=legal?.[req.params.document];
+  if(!document || !['privacy','terms'].includes(req.params.document))return res.status(404).send('Metin henüz yayımlanmadı.');
+  const escape=value=>String(value).replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+  res.type('html').send(`<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(document.title)} — ÜniSatış</title><link rel="stylesheet" href="/styles.css"></head><body><main class="shell page legal-page"><a href="/#/">ÜniSatış</a><h1>${escape(document.title)}</h1><p>Sürüm: ${escape(legal.version)}</p>${document.sections.map(([title,text])=>`<section><h2>${escape(title)}</h2><p>${escape(text)}</p></section>`).join('')}</main></body></html>`);
+});
+app.get('/api/auth/google/nonce',authLimit,(req,res)=>{
+  if(!googleClientId)return fail(res,503,'Google ile giriş henüz yapılandırılmadı.');
+  const key=randomBytes(32).toString('hex'),nonce=randomBytes(32).toString('hex');
+  googleChallenges.set(hash(key),{nonce,expires:Date.now()+10*60000});temporaryCookie(res,'up_google_nonce',key);
+  res.set('Cache-Control','no-store').json({nonce});
+});
+app.post('/api/auth/google',authLimit,wrap(async(req,res)=>{
+  const key=hash(cookieValue(req,'up_google_nonce') || ''),challenge=googleChallenges.get(key);
+  if(!challenge || challenge.expires<Date.now())return fail(res,400,'Google girişinin süresi doldu. Tekrar dene.');
+  let profile;
+  try {profile=await verifyGoogleCredential(req.body.credential,googleClientId,challenge.nonce);}
+  catch {return fail(res,401,'Google hesabı doğrulanamadı. Tekrar dene.');}
+  googleChallenges.delete(key);res.clearCookie('up_google_nonce',{path:'/api'});
+  let user=db.prepare('SELECT u.* FROM google_accounts g JOIN users u ON u.id=g.user_id WHERE g.sub=?').get(profile.sub);
+  if(!user){
+    user=db.prepare('SELECT * FROM users WHERE email=?').get(profile.email);
+    if(user && (!profile.authoritative || !user.email_verified))return fail(res,409,'Bu e-posta ile bir hesap var. E-posta ve şifrenle giriş yap.');
+    if(user && !user.closed_at)db.prepare('INSERT INTO google_accounts(sub,user_id) VALUES(?,?)').run(profile.sub,user.id);
+  }
+  if(user){
+    if(user.closed_at)return fail(res,403,'Bu hesap kapatılmış.');
+    setSession(res,user.id);return res.json({user:publicUser(user)});
+  }
+  const token=randomBytes(32).toString('hex');googleSignups.set(hash(token),{...profile,expires:Date.now()+10*60000});temporaryCookie(res,'up_google_signup',token);
+  res.set('Cache-Control','no-store').json({profile:{name:profile.name,email:profile.email}});
+}));
 app.get('/api/universities', (_req, res) => res.json({ universities, emailVerificationAvailable: emailVerificationAvailable() }));
 app.post('/api/register', wrap(async (req, res) => {
-  const validation=validateRegistration(req.body, [...universityNames]);
+  const signupKey=hash(cookieValue(req,'up_google_signup') || ''),googleProfile=req.body.google===true ? googleSignups.get(signupKey) : null;
+  if(req.body.google===true && (!googleProfile || googleProfile.expires<Date.now()))return fail(res,400,'Google kaydının süresi doldu. Google ile tekrar devam et.');
+  const validation=validateRegistration(googleProfile ? {...req.body,email:googleProfile.email} : req.body, [...universityNames],{passwordRequired:!googleProfile});
+  Object.assign(validation.fields,validateLegalAcceptance(req.body,legal));
   if(Object.keys(validation.fields).length)return res.status(400).json({error:'Lütfen işaretli alanları kontrol et.',fields:validation.fields});
   const {name,email,university,password,phone}=validation.values;
-  if (!dev && !emailVerificationAvailable()) return fail(res,503,'Kayıt şu anda açılamıyor. Lütfen daha sonra tekrar dene.');
+  if (!dev && !emailVerificationAvailable() && !googleProfile?.authoritative) return fail(res,503,'Kayıt şu anda açılamıyor. Lütfen daha sonra tekrar dene.');
   if (db.prepare('SELECT id FROM users WHERE email=?').get(email)) return res.status(409).json({error:'Bu e-posta zaten kayıtlı. Giriş yapabilir veya başka bir e-posta kullanabilirsin.',fields:{email:'Bu e-posta zaten kayıtlı.'}});
-  const result = db.prepare('INSERT INTO users(name,email,password_hash,university,campus,role,student_status,phone) VALUES(?,?,?,?,?,?,?,?)').run(name, email, await passwordHash(password), university, '', 'student', 'pending',phone);
+  const storedPassword=await passwordHash(googleProfile ? randomBytes(32).toString('hex') : password);
+  let result;
+  transaction(()=>{
+    result=db.prepare('INSERT INTO users(name,email,password_hash,university,campus,role,student_status,phone,email_verified) VALUES(?,?,?,?,?,?,?,?,?)').run(name,email,storedPassword,university,'','student','pending',phone,googleProfile?.authoritative ? 1 : 0);
+    if(googleProfile)db.prepare('INSERT INTO google_accounts(sub,user_id) VALUES(?,?)').run(googleProfile.sub,result.lastInsertRowid);
+    recordAcceptance(result.lastInsertRowid);
+  });
   const user = db.prepare('SELECT * FROM users WHERE id=?').get(result.lastInsertRowid);
-  if (!emailVerificationAvailable()) {
-    setSession(res, user.id, req.body.rememberMe === true);
+  if(googleProfile){googleSignups.delete(signupKey);res.clearCookie('up_google_signup',{path:'/api'});}
+  if (!emailVerificationAvailable() || user.email_verified) {
+    setSession(res, user.id);
     return res.status(201).json({ message: 'Hesabın açıldı.', user: publicUser(user) });
   }
   let devCode;

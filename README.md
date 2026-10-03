@@ -45,6 +45,16 @@ Bu sürüm üniversite bazlı pilot içindir. “Beni hatırla” seçiliyse otu
 
 ## Kontrol
 
+### Kayıt, KVKK ve Google ile giriş
+
+Kayıt formunda “Beni hatırla” bulunmaz; yeni hesap oturum çereziyle açılır. Şifreli giriş formunda seçenek korunur. Tarayıcı otomatik doldurması için ad, e-posta, telefon ve yeni şifre alanlarında autocomplete tanımlıdır.
+
+`legal-documents.js` ÜniSatış'ın gerçek özelliklerine göre hazırlanmış iki ayrı metin taslağı içerir: üyelik sözleşmesi ve KVKK aydınlatma metni. Metinler, işletmeci kimliğini ve başvuru e-postasını `LEGAL_CONTROLLER_NAME` ve `LEGAL_CONTACT_EMAIL` ile ayarlayıp `LEGAL_ENABLED=1` yapana kadar yayımlanmaz. İsteğe bağlı `LEGAL_CONTACT_ADDRESS` fiziksel başvuru adresidir. Metin ve gerçek uygulamalar; saklama/silme süreleri, destek başvuruları, yönetici incelemeleri ve Railway/Brevo/Google için yurt dışı aktarım mekanizması bakımından yayımlamadan önce değerlendirilmelidir. Metin veya checkbox eklemek tek başına KVKK uyumunu sağlamaz. Belgelerde esaslı değişiklik yapıldığında `LEGAL_VERSION` güncellenmelidir. Etkinleştirilince kayıt için iki ayrı, başlangıçta boş kutu gösterilir; sunucu aynı kontrolleri uygular ve kabul tarihiyle belgelerin tam sürümünü veritabanına kaydeder. Pazarlama veya genel açık rıza kutusu yoktur.
+
+Google ile giriş için Google Cloud/Google Auth Platform'da bir **Web application** OAuth istemcisi oluştur. Authorized JavaScript origins alanına `https://unipazar-production.up.railway.app` ve yerel denemeler için `http://localhost:3000` ekle (hash veya yol ekleme). OAuth consent screen/branding ve test/yayın durumunu tamamla. Google'ın doğrulanmış domain şartları varsa Railway alt alan adıyla domain sahipliği doğrulanamayabilir; bu durumda sahip olduğun özel alan adı gerekir. Oluşan herkese açık client ID'yi Railway'de `GOOGLE_CLIENT_ID` olarak ayarla; bu akış client secret istemez.
+
+Yapılandırılınca giriş ve kayıtta Google'ın resmi düğmesi görünür. ID token imzası, hedef client ID, süre ve tek kullanımlık nonce sunucuda doğrulanır. Google hesabı yeni ise ad/e-posta doldurulur; kullanıcı üniversite, telefon ve etkinleştirilmiş belgeleri tamamlar. Gmail veya doğrulanmış Workspace adresleri doğrulanmış kabul edilir; diğer Google e-postaları ayrıca uygulamanın e-posta koduyla doğrulanır. Var olan doğrulanmış hesap yalnızca Google'ın yetkili olduğu aynı e-posta ile eşleştirilir; aksi durumda şifreli giriş gerekir. Google yalnızca hesap sahipliğini doğrular, gerçek kişi kimliğini veya öğrenciliği doğrulamaz. Google'dan telefon, üniversite ve şifre alınmaz. Gerçek Google hesabıyla uçtan uca test için OAuth client ID gereklidir.
+
 ```powershell
 npm run check
 npm test

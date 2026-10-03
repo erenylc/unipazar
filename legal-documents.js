@@ -1,0 +1,34 @@
+export const LEGAL_VERSION = '2026-10-03';
+export function legalDocuments(env = process.env) {
+  const name = env.LEGAL_CONTROLLER_NAME?.trim(), email = env.LEGAL_CONTACT_EMAIL?.trim();
+  if (env.LEGAL_ENABLED !== '1' || !name || !email) return null;
+  const contact = `Veri sorumlusu: ${name}. Başvuru ve iletişim: ${email}.${env.LEGAL_CONTACT_ADDRESS?.trim() ? ' Adres: '+env.LEGAL_CONTACT_ADDRESS.trim()+'.' : ''}`;
+  return {
+    version: LEGAL_VERSION,
+    privacy: {title:'KVKK Aydınlatma Metni', sections:[
+      ['Veri sorumlusu', contact],
+      ['Hangi bilgiler işlenir?', 'Kayıt sırasında ad-soyad, e-posta, telefon ve üniversite bilgilerin; şifreli girişte şifrenin tek yönlü özeti ve oturum kayıtları işlenir. Google ile devam edersen Google hesap kimliğin, adın ve e-postan alınır. İlan, fotoğraf, mesaj, ses kaydı, favori ve şikâyet içeriklerin kullandığın özelliklere göre saklanır. Telefon numarası veya üniversite bilgisi girmek, bağımsız kimlik ya da öğrencilik doğrulaması değildir.'],
+      ['Amaçlar ve hukuki sebepler', 'Üyeliğin oluşturulması, ilan paylaşımı ve mesajlaşma için gerekli bilgiler KVKK 5/2(c) kapsamında sözleşmenin kurulması ve ifası amacıyla işlenir. Hukuki talepler ve uyuşmazlık kayıtları 5/2(e), güvenlik ve kötüye kullanımın önlenmesi için gerekli kayıtlar temel haklarına zarar vermemek kaydıyla 5/2(f) kapsamında işlenir. İsteğe bağlı destek başvurusunda gerekçe, aile geliri ve kimlik numarasının son dört hanesi başvurunun değerlendirilmesi için alınır; bunlar başvuruyu inceleyen yöneticiye gösterilir. Başvuruda sağlık bilgisi gibi özel nitelikli veriler paylaşma.'],
+      ['Kimler görebilir?', 'İlanların, ilan fotoğrafların, görünen adın ve üniversiten ilanı görebilen kullanıcılara gösterilir. Özel mesajların konuşmanın taraflarına gösterilir. Yetkili yönetici hesap bilgilerini ve şikâyet veya kötüye kullanım incelemesi kapsamında konuşmaları inceleyebilir; incelemeler denetim kaydına alınır. Destek başvurusu bilgileri diğer kullanıcılara gösterilmez.'],
+      ['Hizmet sağlayıcılar ve yurt dışı', 'Uygulama Railway üzerinde barındırılır; e-posta doğrulaması için Brevo kullanılır. Bu hizmetlere, barındırma ve e-posta gönderimi için gerekli bilgiler iletilir. Google ile giriş seçilirse Google hesap doğrulamasına katılır. Hizmet sağlayıcıların yurt dışı altyapıları nedeniyle veriler yurt dışında işlenebilir. Yurt dışı aktarım için KVKK 9 kapsamında uygun aktarım mekanizmasının işletmeci tarafından sağlanması gerekir; bu metni okumak veya üyelik sözleşmesini kabul etmek yurt dışı aktarıma açık rıza yerine geçmez.'],
+      ['Toplama yöntemi ve saklama', 'Bilgiler kayıt formları, hesap ekranları, ilanlar, mesajlaşma ve isteğe bağlı Google hesap doğrulaması üzerinden elektronik ortamda toplanır. Oturum çerezleri giriş için; tarayıcı yerel depolaması tema, dil ve ilan taslağı için kullanılır. Bilgiler hizmetin sunulması ve hukuki gereklilikler için gerekli süre boyunca saklanır. Hesabın kapatılması verilerin kendiliğinden silindiği anlamına gelmez; silme talepleri ayrıca değerlendirilir.'],
+      ['Hakların ve başvuru', `KVKK 11 kapsamında verilerinin işlenip işlenmediğini öğrenebilir, bilgi isteyebilir, işleme amacını ve aktarılan tarafları öğrenebilir, yanlış bilgilerin düzeltilmesini veya koşulları oluştuğunda silinmesini isteyebilir, bu işlemlerin alıcılara bildirilmesini talep edebilir, münhasıran otomatik analiz sonucu aleyhine çıkan sonuçlara itiraz edebilir ve hukuka aykırı işleme nedeniyle zararının giderilmesini isteyebilirsin. Uygulamada kayıtlı e-posta adresin üzerinden ${email} adresine başvurabilirsin. Başvurular en geç 30 gün içinde yanıtlanır.`]
+    ]},
+    terms: {title:'Üyelik Sözleşmesi', sections:[
+      ['Taraflar ve hizmet', `${contact} ÜniSatış, üniversite öğrencileri arasında ikinci el ilan paylaşımı, iletişim ve ücretsiz eşya paylaşımına aracılık eden bir platformdur. Üye, bu sözleşmeyi kayıt sırasında kabul eden kullanıcıdır.`],
+      ['Hesap ve kullanım', 'Doğru ve güncel bilgiler ver; hesabını ve şifreni koru. Başkasının kimliğiyle hesap açma. Google ile giriş yalnızca Google hesabını doğrular; öğrencilik veya gerçek kişi kimliği garantisi değildir.'],
+      ['İlanlar ve iletişim', 'İlanın mülkiyeti, açıklaması, fiyatı ve fotoğraflarından ilan sahibi sorumludur. Dolandırıcılık, tehdit, taciz, hukuka aykırı ürünler ve başkasının kişisel verilerini izinsiz paylaşmak yasaktır. Başkasına ait fotoğrafları izinsiz yükleme.'],
+      ['Alışveriş ve dayanışma', 'ÜniSatış şu anda ödeme veya kargo hizmeti sunmaz. Ürün, ödeme, teslim ve varsa iade koşullarını taraflar kendi aralarında belirler. İşletmeci satıcı değildir; ilan vermek ürünün, kullanıcının veya işlemin güvenilirliğine dair garanti oluşturmaz. Ücretsiz eşya ilanlarına erişim destek başvurusu değerlendirmesine bağlı olabilir. Kanundan doğan haklar saklıdır.'],
+      ['İnceleme ve hesap kapatma', 'Yetkili yönetici şikâyetleri ve kötüye kullanımı inceleyebilir; kuralları ihlal eden ilanları kaldırabilir ve hesapları kapatabilir. Konuşmaların yönetici tarafından incelenebileceği mesajlaşma ekranında bildirilir. Kullanıcı hesabının kapatılmasını ve verileriyle ilgili taleplerini iletişim e-postasına iletebilir.'],
+      ['Kişisel veriler ve değişiklikler', 'Kişisel verilerin işlenmesine ilişkin açıklamalar ayrı KVKK Aydınlatma Metninde bulunur. Bu sözleşmenin kabulü pazarlama izni veya tüm veri işlemlerine açık rıza anlamına gelmez. Güncel koşullar uygulamada yayımlanır; esaslı değişiklikler gerektiğinde ayrıca bildirilir.']
+    ]}
+  };
+}
+export function validateLegalAcceptance(values, documents) {
+  if (!documents) return {};
+  const fields = {};
+  if (values.termsAccepted !== true && values.termsAccepted !== 'true') fields.termsAccepted = 'Üyelik sözleşmesini kabul etmelisin.';
+  if (values.privacyRead !== true && values.privacyRead !== 'true') fields.privacyRead = 'KVKK aydınlatma metnini okuyup anladığını belirt.';
+  if (values.legalVersion !== documents.version) fields.termsAccepted = 'Metinler güncellendi. Sayfayı yenileyip tekrar incele.';
+  return fields;
+}

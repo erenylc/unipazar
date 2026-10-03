@@ -11,7 +11,7 @@ function localizedMessageText(value){
  for(const prefix of ['📷 Fotoğraf','🎤 Sesli mesaj'])if(text.startsWith(prefix))return translateText(prefix,language)+text.slice(prefix.length);
  return text;
 }
-const state = { user:null, listings:[], universities:[], emailVerificationAvailable:false, unreadCount:0, selectedConversation:null, filters:{ q:'',category:'',kind:'',university:'' }, modal:null, authTab:'login', devCode:'', pendingRememberMe:false, pendingEmailVerification:false };
+const state = { user:null, listings:[], universities:[], emailVerificationAvailable:false, googleClientId:'', googleProfile:null, legalVersion:null, unreadCount:0, selectedConversation:null, filters:{ q:'',category:'',kind:'',university:'' }, modal:null, authTab:'login', devCode:'', pendingRememberMe:false, pendingEmailVerification:false };
 let language=languages[localStorage.getItem('unipazar-language')]?localStorage.getItem('unipazar-language'):'tr';
 let theme=localStorage.getItem('unipazar-theme')==='dark'?'dark':'light';document.documentElement.dataset.theme=theme;
  const categories = ['Ders kitapları','Elektronik','Ev & yurt','Giyim','Bisiklet & spor','Diğer'];
@@ -317,14 +317,14 @@ async function startVoiceRecording(){
 }
 function discardVoiceRecording(){discardVoice=true;voiceClip=null;if(voicePreviewUrl)URL.revokeObjectURL(voicePreviewUrl);voicePreviewUrl=null;if(voiceRecorder?.state==='recording')voiceRecorder.stop();else updateVoiceStatus();}
 function stopCamera(){cameraStream?.getTracks().forEach(track=>track.stop());cameraStream=null;}
-function showAuth(tab='login'){ state.authTab=tab; state.modal='auth'; drawModal(); }
+function showAuth(tab='login'){ state.googleProfile=null;state.authTab=tab; state.modal='auth'; drawModal(); }
 function showSimpleModal(title,body,form){ state.modal={title,body,form}; drawModal(); }
 function universityPickerForm(){
  return `<div class="field"><label for="universityPickerSearch">Üniversite ara</label><input id="universityPickerSearch" placeholder="Üniversite adı yaz"></div><div class="university-options"><button class="university-option" data-action="select-university" data-university="*">Tüm üniversiteler</button>${state.universities.map(u=>`<button class="university-option" data-action="select-university" data-university="${escapeHtml(u)}">${escapeHtml(u)}</button>`).join('')}</div>`;
 }
 function drawModal(){
  let html='';
- if(state.modal==='auth') html=`<div class="modal-backdrop"><div class="modal" role="dialog" aria-modal="true" aria-label="Hesap"><div class="modal-top"><h2>${state.authTab==='register'?'Üni Satış’a katıl':state.authTab==='verify'?'E-postanı doğrula':'Hesabınızı giriniz'}</h2><button class="close" data-action="close-modal" aria-label="Kapat">×</button></div>${state.authTab!=='verify'?`<div class="auth-tabs"><button class="btn ${state.authTab==='login'?'btn-primary':'btn-light'}" data-action="auth-tab" data-tab="login">Giriş yap</button><button class="btn ${state.authTab==='register'?'btn-primary':'btn-light'}" data-action="auth-tab" data-tab="register">Kayıt ol</button></div>`:''}${state.authTab==='register'?`<form data-form="register" novalidate><div class="registration-alert" role="alert" hidden></div><div class="field"><label>Adın ve soyadın</label><input name="name" required maxlength="80"></div><div class="field"><label>Üniversiten</label><select name="university" required disabled><option value="">Üniversiteler yükleniyor…</option></select><span class="hint">Türkiye'deki üniversiteler listesinden seç.</span></div><div class="field"><label>E-posta</label><input type="email" name="email" required placeholder="ornek@eposta.com"></div><div class="field"><label for="registerPhone">Telefon numaran</label><input id="registerPhone" type="tel" name="phone" autocomplete="tel" inputmode="tel" maxlength="25" required placeholder="05xx xxx xx xx"><span class="hint">Cep telefonu numaranı gir. SMS doğrulaması henüz yapılmıyor.</span></div><div class="field"><label>Şifre</label><input type="password" name="password" required minlength="10"><span class="hint">En az 10 karakter.</span></div><label class="remember"><input type="checkbox" name="rememberMe" value="true"> Beni hatırla</label><button class="btn btn-primary" style="width:100%">Hesap aç</button></form>`:state.authTab==='verify'?`<p class="muted small">E-postana gönderilen 6 haneli kodu gir. </p>${state.devCode?`<p class="status">Geliştirme kodu: ${escapeHtml(state.devCode)}</p>`:''}<form data-form="verify"><div class="field"><label>E-posta</label><input type="email" name="email" value="${escapeHtml(state.pendingEmail||'')}" required></div><div class="field"><label>Doğrulama kodu</label><input name="code" inputmode="numeric" maxlength="6" required></div><button class="btn btn-primary" style="width:100%">Doğrula</button></form><button class="btn btn-light" data-action="resend-code" style="width:100%;margin-top:8px">Yeni kod gönder</button>`:`<form data-form="login"><div class="field"><label>E-posta</label><input type="email" name="email" required></div><div class="field"><label>Şifre</label><input type="password" name="password" required></div><label class="remember"><input type="checkbox" name="rememberMe" value="true"> Beni hatırla</label><button class="btn btn-primary" style="width:100%">Giriş yap</button></form><button class="btn btn-light" style="width:100%;margin-top:8px" data-action="auth-tab" data-tab="verify">Kodla doğrula</button>`}</div></div>`;
+ if(state.modal==='auth') html=`<div class="modal-backdrop"><div class="modal" role="dialog" aria-modal="true" aria-label="Hesap"><div class="modal-top"><h2>${state.authTab==='register'?'Üni Satış’a katıl':state.authTab==='verify'?'E-postanı doğrula':'Hesabınızı giriniz'}</h2><button class="close" data-action="close-modal" aria-label="Kapat">×</button></div>${state.authTab!=='verify'?`<div class="auth-tabs"><button class="btn ${state.authTab==='login'?'btn-primary':'btn-light'}" data-action="auth-tab" data-tab="login">Giriş yap</button><button class="btn ${state.authTab==='register'?'btn-primary':'btn-light'}" data-action="auth-tab" data-tab="register">Kayıt ol</button></div>`:''}${state.authTab==='register'?`<form data-form="register" novalidate><div class="registration-alert" role="alert" hidden></div><div class="field"><label>Adın ve soyadın</label><input name="name" required maxlength="80"></div><div class="field"><label>Üniversiten</label><select name="university" required disabled><option value="">Üniversiteler yükleniyor…</option></select><span class="hint">Türkiye'deki üniversiteler listesinden seç.</span></div><div class="field"><label>E-posta</label><input type="email" name="email" required placeholder="ornek@eposta.com"></div><div class="field"><label for="registerPhone">Telefon numaran</label><input id="registerPhone" type="tel" name="phone" autocomplete="tel" inputmode="tel" maxlength="25" required placeholder="05xx xxx xx xx"><span class="hint">Cep telefonu numaranı gir. SMS doğrulaması henüz yapılmıyor.</span></div><div class="field"><label>Şifre</label><input type="password" name="password" required minlength="10"><span class="hint">En az 10 karakter.</span></div><button class="btn btn-primary" style="width:100%">Hesap aç</button></form>`:state.authTab==='verify'?`<p class="muted small">E-postana gönderilen 6 haneli kodu gir. </p>${state.devCode?`<p class="status">Geliştirme kodu: ${escapeHtml(state.devCode)}</p>`:''}<form data-form="verify"><div class="field"><label>E-posta</label><input type="email" name="email" value="${escapeHtml(state.pendingEmail||'')}" required></div><div class="field"><label>Doğrulama kodu</label><input name="code" inputmode="numeric" maxlength="6" required></div><button class="btn btn-primary" style="width:100%">Doğrula</button></form><button class="btn btn-light" data-action="resend-code" style="width:100%;margin-top:8px">Yeni kod gönder</button>`:`<form data-form="login"><div class="field"><label>E-posta</label><input type="email" name="email" required></div><div class="field"><label>Şifre</label><input type="password" name="password" required></div><label class="remember"><input type="checkbox" name="rememberMe" value="true"> Beni hatırla</label><button class="btn btn-primary" style="width:100%">Giriş yap</button></form><button class="btn btn-light" style="width:100%;margin-top:8px" data-action="auth-tab" data-tab="verify">Kodla doğrula</button>`}</div></div>`;
  else if(state.modal==='camera') html=`<div class="modal-backdrop"><div class="modal camera-modal" role="dialog" aria-modal="true" aria-label="Fotoğraf gönder"><div class="modal-top"><h2>Fotoğraf gönder</h2><button class="close" data-action="close-modal" aria-label="Kapat">×</button></div><p class="muted">Ürünün ayrıntısını şimdi çekebilir veya galerinden seçebilirsin.</p><div class="camera-options"><button type="button" class="btn btn-primary" id="cameraStart" data-action="camera-start">Kamerayı aç</button><label class="btn btn-outline camera-gallery">Galeriden seç<input id="chatGalleryInput" type="file" accept="image/*,.heic,.heif"></label></div><video id="cameraPreview" autoplay playsinline muted hidden></video><button class="btn btn-primary camera-capture" id="cameraCapture" data-action="camera-capture" hidden>Fotoğrafı çek</button></div></div>`;
  else if(state.modal) html=`<div class="modal-backdrop"><div class="modal" role="dialog" aria-modal="true" aria-label="${escapeHtml(state.modal.title)}"><div class="modal-top"><h2>${escapeHtml(state.modal.title)}</h2><button class="close" data-action="close-modal" aria-label="Kapat">×</button></div><p class="muted">${escapeHtml(state.modal.body)}</p>${state.modal.form}</div></div>`;
  if(state.modal==='auth' && state.authTab==='login' && !state.emailVerificationAvailable){
@@ -333,6 +333,37 @@ function drawModal(){
  $('#modal-root')?.remove(); if(html) document.body.insertAdjacentHTML('beforeend',`<div id="modal-root">${html}</div>`);
  if(html)applyLocale($('#modal-root'),language);
  setupRegistrationForm();
+ if(state.modal==='auth' && state.authTab!=='verify' && !state.googleProfile && state.googleClientId){
+  $('.auth-tabs').insertAdjacentHTML('afterend','<div class="google-auth"><div id="googleSignIn"></div><p class="hint" id="googleSignInStatus" role="status">Google ile giriş yükleniyor…</p></div>');
+  setupGoogleSignIn().catch(()=>{const status=$('#googleSignInStatus');if(status)status.textContent='Google ile giriş yüklenemedi. E-posta ile devam edebilirsin.';});
+ }
+}
+let googleScriptRequest=null;
+async function setupGoogleSignIn(){
+ const button=$('#googleSignIn');
+ if(!googleScriptRequest)googleScriptRequest=new Promise((resolve,reject)=>{
+  if(window.google?.accounts?.id)return resolve();
+  const script=document.createElement('script');script.src='https://accounts.google.com/gsi/client';script.async=true;script.onload=resolve;script.onerror=()=>{script.remove();googleScriptRequest=null;reject(new Error('Google yüklenemedi.'));};document.head.append(script);
+ });
+ const [,challenge]=await Promise.all([googleScriptRequest,api('/api/auth/google/nonce')]);
+ if(!button?.isConnected)return;
+ window.google.accounts.id.initialize({client_id:state.googleClientId,nonce:challenge.nonce,auto_select:false,callback:async(response)=>{
+  try{
+   const result=await api('/api/auth/google',{method:'POST',body:{credential:response.credential}});
+   if(result.user){state.user=result.user;state.googleProfile=null;connectMessageStream();closeModal();await refreshUnread();return render();}
+   state.googleProfile=result.profile;state.authTab='register';drawModal();
+  }catch(error){toast(error.message);if(state.modal==='auth')drawModal();}
+ }});
+ window.google.accounts.id.renderButton(button,{type:'standard',theme:'outline',size:'large',text:'continue_with',locale:'tr'});
+ $('#googleSignInStatus').textContent='';
+}
+function registrationValidation(values){
+ const validation=validateRegistration(values,state.universities,{passwordRequired:!state.googleProfile});
+ if(state.legalVersion){
+  if(values.termsAccepted!=='true')validation.fields.termsAccepted='Üyelik sözleşmesini kabul etmelisin.';
+  if(values.privacyRead!=='true')validation.fields.privacyRead='KVKK aydınlatma metnini okuyup anladığını belirt.';
+ }
+ return validation;
 }
 let universitiesRequest=null;
 async function loadUniversities(){
@@ -351,10 +382,18 @@ async function populateRegistrationUniversities(form){
 }
 function setupRegistrationForm(){
  const form=$('[data-form="register"]');if(!form)return;
+ if(state.googleProfile){
+  form.elements.name.value=state.googleProfile.name;form.elements.email.value=state.googleProfile.email;form.elements.email.readOnly=true;
+  form.elements.password.closest('.field').remove();
+  form.querySelector('.registration-alert').insertAdjacentHTML('afterend','<p class="google-profile-note">Google hesabın doğrulandı. Üniversiteni ve telefon numaranı tamamla.</p>');
+ }
+ if(state.legalVersion){
+  form.querySelector('button:not([type])').insertAdjacentHTML('beforebegin',`<div class="registration-legal"><input type="hidden" name="legalVersion" value="${escapeHtml(state.legalVersion)}"><div class="field"><label class="legal-check"><input name="termsAccepted" type="checkbox" value="true"><span><a href="/legal/terms" target="_blank" rel="noopener">Üyelik Sözleşmesi</a>’ni okudum ve kabul ediyorum.</span></label></div><div class="field"><label class="legal-check"><input name="privacyRead" type="checkbox" value="true"><span><a href="/legal/privacy" target="_blank" rel="noopener">KVKK Aydınlatma Metni</a>’ni okudum ve anladım.</span></label></div></div>`);
+ }
  for(const input of form.querySelectorAll('.field input,.field select')){
   input.id=input.id||'register-'+input.name;
   input.closest('.field').querySelector('label').htmlFor=input.id;
-  const error=document.createElement('span');error.id=input.id+'-error';error.className='field-error';error.hidden=true;input.after(error);
+  const error=document.createElement('span');error.id=input.id+'-error';error.className='field-error';error.hidden=true;if(input.type==='checkbox')input.closest('.field').append(error);else input.after(error);
   input.setAttribute('aria-describedby',error.id);
   input.autocomplete=({name:'name',email:'email',password:'new-password',phone:'tel'})[input.name]||'off';
  }
@@ -371,12 +410,12 @@ function showRegistrationErrors(form,fields,message='',focus=false){
 }
 document.addEventListener('change',event=>{
  const input=event.target,form=input.closest('[data-form="register"]');if(!form||input.name!=='university')return;
- const fields=validateRegistration(Object.fromEntries(new FormData(form)),state.universities).fields;
+ const fields=registrationValidation(Object.fromEntries(new FormData(form))).fields;
  const error=form.querySelector('#'+input.id+'-error');input.setAttribute('aria-invalid',fields.university?'true':'false');error.textContent=translateText(fields.university||'',language);error.hidden=!fields.university;
 });
 document.addEventListener('focusout',event=>{
  const form=event.target.closest('[data-form="register"]');if(!form||!event.target.name)return;
- const fields=validateRegistration(Object.fromEntries(new FormData(form)),state.universities).fields;
+ const fields=registrationValidation(Object.fromEntries(new FormData(form))).fields;
  const input=event.target,error=form.querySelector('#'+input.id+'-error');if(!error)return;
  input.setAttribute('aria-invalid',fields[input.name]?'true':'false');error.hidden=!fields[input.name];error.textContent=translateText(fields[input.name]||'',language);
 });
@@ -384,7 +423,7 @@ document.addEventListener('input',event=>{
  const form=event.target.closest('[data-form="register"]');if(!form)return;
  const input=event.target,error=form.querySelector('#'+input.id+'-error');if(!error)return;
  if(input.getAttribute('aria-invalid')==='true'){
-  const fields=validateRegistration(Object.fromEntries(new FormData(form)),state.universities).fields;
+  const fields=registrationValidation(Object.fromEntries(new FormData(form))).fields;
   error.textContent=translateText(fields[input.name]||'',language);error.hidden=!fields[input.name];input.setAttribute('aria-invalid',fields[input.name]?'true':'false');
  }
  form.querySelector('.registration-alert').hidden=true;
@@ -436,7 +475,7 @@ function showRouteLoading(path){
 async function render(){const path=route(),sequence=++navigationSequence;
  const loadingTimer=setTimeout(()=>{if(sequence===navigationSequence&&route()===path)showRouteLoading(path);},120);
  try { const path=route(); if(!state.user && accountRoutes.has(path)){await renderBrowse();showAuth();return;} if(path==='/') await renderBrowse(); else if(path==='/donation') await renderBrowse(true); else if(path.startsWith('/listing/')) {await renderDetail(path.split('/')[2]);decorateDetail();} else if(path.startsWith('/seller/')) await renderSeller(path.split('/')[2]); else if(path==='/sell') renderSellChoice(); else if(path==='/sell-sale') {renderSell();restoreDraft();} else if(path==='/sell-donation') {renderSell('donation');restoreDraft();} else if(path==='/favorites') await renderFavorites(); else if(path.startsWith('/admin-messages/'))await renderAdminMessages(path.split('/')[2],path.split('/')[3]);else if(path.startsWith('/admin-message/')){if(state.user?.role!=='admin'){go('/');return;}state.selectedConversation=Number(path.split('/')[2]);await renderMessages();}else if(path==='/messages') await renderMessages(); else if(path==='/mine') await renderListingsDashboard(); else if(path==='/manage') await renderManage(); else if(path==='/account'){await loadUniversities();renderAccount();} else if(path==='/support') await renderSupport(); else if(path==='/admin') await renderAdmin(); else go('/'); } catch(error){ if(sequence===navigationSequence){toast(error.message);pageFrame(`<main class="shell page">${empty('Sayfa yüklenemedi',error.message)}</main>`,'/');} } finally {clearTimeout(loadingTimer);} }
-async function refreshUser(){const result=await api('/api/me');state.user=result.user;state.emailVerificationAvailable=result.emailVerificationAvailable;connectMessageStream();}
+async function refreshUser(){const result=await api('/api/me');state.user=result.user;state.emailVerificationAvailable=result.emailVerificationAvailable;state.googleClientId=result.googleClientId||'';state.legalVersion=result.legalVersion||null;connectMessageStream();}
 async function refreshUnread(){
   state.unreadCount=state.user?(await api('/api/unread-count')).count:0;
   document.querySelectorAll('.message-count').forEach(badge=>{badge.hidden=state.unreadCount===0;badge.textContent=state.unreadCount>99?'99+':String(state.unreadCount);});
@@ -503,7 +542,7 @@ document.addEventListener('click',async event=>{
    }
    if(action==='select-university'){state.filters.university=target.dataset.university;closeModal();return render();}
    if(action==='retry-universities'){const form=target.closest('form');showRegistrationErrors(form,{});return populateRegistrationUniversities(form);}
-   if(action==='auth-tab'){state.authTab=target.dataset.tab;return drawModal();}
+   if(action==='auth-tab'){state.googleProfile=null;state.authTab=target.dataset.tab;return drawModal();}
    if(action==='sell'){ if(!state.user)return showAuth(); return go('/sell'); }
    if(action==='sell-donation'){ if(!state.user)return showAuth(); return go('/sell-donation'); }
    if(action==='filter-category'){state.filters.category=target.dataset.category;return render();}
@@ -577,7 +616,7 @@ document.addEventListener('submit',async event=>{
  const form=event.target.closest('[data-form]'); if(!form)return; event.preventDefault();
  const type=form.dataset.form, data=Object.fromEntries(new FormData(form).entries()); const submit=form.querySelector('[type="submit"],button:not([type])'); if(submit)submit.disabled=true;
  try{
-  if(type==='register'){const validation=validateRegistration(data,state.universities);showRegistrationErrors(form,validation.fields,Object.keys(validation.fields).length?'Lütfen işaretli alanları kontrol et.':'',true);if(Object.keys(validation.fields).length)return;Object.assign(data,validation.values);data.rememberMe=data.rememberMe==='true';const result=await api('/api/register',{method:'POST',body:data});if(result.user){state.user=result.user;connectMessageStream();refreshUnread().catch(()=>{});closeModal();toast(result.message);return render();}state.pendingEmail=data.email;state.pendingRememberMe=data.rememberMe;state.devCode=result.devCode||'';state.authTab='verify';drawModal();toast(result.message);return;}
+  if(type==='register'){const validation=registrationValidation(data);showRegistrationErrors(form,validation.fields,Object.keys(validation.fields).length?'Lütfen işaretli alanları kontrol et.':'',true);if(Object.keys(validation.fields).length)return;Object.assign(data,validation.values);data.rememberMe=false;data.google=!!state.googleProfile;const result=await api('/api/register',{method:'POST',body:data});if(result.user){state.user=result.user;connectMessageStream();refreshUnread().catch(()=>{});closeModal();toast(result.message);return render();}state.pendingEmail=data.email;state.pendingRememberMe=data.rememberMe;state.devCode=result.devCode||'';state.authTab='verify';drawModal();toast(result.message);return;}
   if(type==='verify'){data.rememberMe=state.pendingRememberMe;const result=await api('/api/verify-email',{method:'POST',body:data});state.user=result.user;connectMessageStream();closeModal();toast('E-posta doğrulandı.');return render();}
   if(type==='login'){data.rememberMe=data.rememberMe==='true';const result=await api('/api/login',{method:'POST',body:data});state.user=result.user;connectMessageStream();refreshUnread().catch(()=>{});closeModal();toast('Hoş geldin!');return render();}
   if(type==='listing'){if(!selectedListingPhotos.length)throw new Error('En az bir ürün fotoğrafı ekle.');const body=new FormData(form);body.delete('photos');selectedListingPhotos.forEach(photo=>body.append('photos',photo,photo.name));if(body.get('kind')==='donation')body.set('price','0');const result=await api('/api/listings',{method:'POST',body});localStorage.removeItem('unipazar-listing-draft');selectedListingPhotos=[];toast('İlan yayınlandı.');return go('/listing/'+result.id);}
