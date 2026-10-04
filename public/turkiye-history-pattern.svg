@@ -1,10 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="480" height="360" viewBox="0 0 480 360">
- <g fill="none" stroke="#8b7f74" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" opacity=".09">
+ <g fill="none" stroke="#96754f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity=".22">
   <!-- Galata's stone tower, Cappadocian chimneys and Anatolian stone arches. -->
   <g transform="translate(35 30)"><path d="M10 70h46M17 70V27h32v43M11 27h44L33 5 11 27Zm4 6h36M17 55h32M21 45v-5a4 4 0 0 1 8 0v5m9 0v-5a4 4 0 0 1 8 0v5M29 70v-9a4 4 0 0 1 8 0v9M33 0v5"/></g>
   <g transform="translate(280 50)"><path d="M0 60h65M10 60l6-42h22l6 42M12 18 27 0l14 18H12Zm15 32v-8a4 4 0 0 1 8 0v8M44 60l5-25h10l5 25M46 35l8-12 8 12"/></g>
   <g transform="translate(140 205)"><path d="M0 64h80M8 64V5h64v59M4 5h72M14 64V22l26-12 26 12v42M22 64V35a18 18 0 0 1 36 0v29M28 64V35a12 12 0 0 1 24 0v29M8 16h9m46 0h9M8 44h8m48 0h8"/></g>
   <g transform="translate(370 245)"><path d="M0 40h65M5 40V17h16v23M26 40V5h17v35M48 40V23h13v17M5 17l8-7 8 7M26 5l8-5 9 5M9 27h8m14-8h7m-7 11h7"/></g>
+  <!-- Tulip and eight-pointed Seljuk star motifs. -->
+  <g transform="translate(355 142)"><path d="M0 30C0 17-9 14-9 4l9 7 9-7c0 10-9 13-9 26v26M0 43c-12 0-15-9-15-9 12 0 15 9 15 9Zm0 7c12 0 15-9 15-9-12 0-15 9-15 9Z"/></g>
+  <g transform="translate(82 155)"><path d="m0-15 6 9 9-9v12l9 3-9 6v12l-9-9-6 9-6-9-9 9V6l-9-6 9-3v-12l9 9Z"/><path d="m0-8 8 8-8 8-8-8Z"/></g>
   <path d="M215 70h8m-4-4v8M420 150h6m-3-3v6M55 225h6m-3-3v6M285 305h7m-3.5-3.5v7"/>
  </g>
 </svg>
