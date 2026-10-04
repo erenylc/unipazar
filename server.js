@@ -186,6 +186,10 @@ app.set('trust proxy', 1);
 app.use(express.json({ limit: '100kb' }));
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options','DENY');
+  res.setHeader('Content-Security-Policy',"frame-ancestors 'none'; object-src 'none'; base-uri 'self'");
+  if(req.secure)res.setHeader('Strict-Transport-Security','max-age=31536000');
+  if(req.path.startsWith('/api/'))res.setHeader('Cache-Control','private, no-store');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
   if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
@@ -226,6 +230,15 @@ function authLimit(req,res,next){
 }
 app.use(['/api/register','/api/login','/api/verify-email','/api/resend-code','/api/me/email','/api/me/phone','/api/me/verify-email'],authLimit);
 app.use(['/api/password-reset/request','/api/password-reset/confirm'],authLimit);
+const writeAttempts=new Map();
+setInterval(()=>{const now=Date.now();for(const [key,entry] of attempts)if(now>entry.reset)attempts.delete(key);for(const [key,entry] of writeAttempts)if(now>entry.reset)writeAttempts.delete(key);},60000).unref();
+app.use(['/api/reports','/api/listings','/api/conversations','/api/me/avatar'],(req,res,next)=>{
+ if(['GET','HEAD','OPTIONS'].includes(req.method))return next();
+ const now=Date.now();let entry=writeAttempts.get(req.ip);if(!entry||now>entry.reset)entry={count:0,reset:now+60000};
+ entry.count++;writeAttempts.set(req.ip,entry);
+ if(entry.count>120){res.set('Retry-After',String(Math.ceil((entry.reset-now)/1000)));return fail(res,429,'Çok fazla işlem yapıldı. Biraz bekleyip tekrar dene.');}
+ next();
+});
 
 const hash = value => createHash('sha256').update(value).digest('hex');
 const legal = legalDocuments();
@@ -643,7 +656,12 @@ app.post('/api/listings', (req,res,next)=>{
   });
   res.status(201).json({ id: Number(result.lastInsertRowid) });
 });
-app.patch('/api/listings/:id', upload.array('photos',6), async (req, res) => {
+app.patch('/api/listings/:id', (req,res,next)=>{
+ const user=requireUser(req,res);if(!user)return;
+ const listing=db.prepare('SELECT seller_id FROM listings WHERE id=?').get(req.params.id);
+ if(!listing||(listing.seller_id!==user.id&&user.role!=='admin'))return fail(res,404,'İlan bulunamadı.');
+ next();
+}, upload.array('photos',6), async (req, res) => {
   const user = requireUser(req,res); if (!user) return;
   const listing = db.prepare('SELECT * FROM listings WHERE id=?').get(req.params.id);
   if (!listing || (listing.seller_id !== user.id && user.role !== 'admin')) return fail(res,404,'İlan bulunamadı.');
@@ -775,7 +793,12 @@ app.post('/api/conversations/:id/clear',(req,res)=>{
  db.prepare('UPDATE messages SET read_at=? WHERE conversation_id=? AND sender_id<>? AND read_at IS NULL AND id<=?').run(Date.now(),conversation.id,user.id,last);
  res.json({ok:true});
 });
-app.post('/api/conversations/:id/messages', upload.fields([{name:'photo',maxCount:1},{name:'voice',maxCount:1}]), async (req, res) => {
+app.post('/api/conversations/:id/messages', (req,res,next)=>{
+ const user=requireUser(req,res);if(!user)return;
+ const conversation=db.prepare('SELECT buyer_id,seller_id FROM conversations WHERE id=?').get(req.params.id);
+ if(!conversation||![conversation.buyer_id,conversation.seller_id].includes(user.id))return fail(res,404,'Konuşma bulunamadı.');
+ next();
+}, upload.fields([{name:'photo',maxCount:1},{name:'voice',maxCount:1}]), async (req, res) => {
   const user = requireUser(req,res); if (!user) return;
   const conversation = db.prepare('SELECT * FROM conversations WHERE id=?').get(req.params.id);
   if (!conversation || ![conversation.buyer_id,conversation.seller_id].includes(user.id)) return fail(res,404,'Konuşma bulunamadı.');
@@ -1045,6 +1068,18 @@ app.patch('/api/admin/support/:id', (req,res) => {
   });
   res.json({ok:true});
 });
+app.delete('/api/admin/support/:id',(req,res)=>{
+ if(!requireAdmin(req,res))return;
+ if(req.body.confirmation!==true)return fail(res,400,'İşlemi onaylamalısın.');
+ const application=db.prepare('SELECT status FROM support_applications WHERE user_id=?').get(req.params.id);
+ if(!application)return fail(res,404,'Başvuru bulunamadı.');
+ if(application.status==='pending')return fail(res,409,'Önce başvuruyu değerlendir.');
+ transaction(()=>{
+  db.prepare('UPDATE users SET support_verified=0 WHERE id=?').run(req.params.id);
+  db.prepare('DELETE FROM support_applications WHERE user_id=?').run(req.params.id);
+ });
+ res.json({ok:true});
+});
 app.patch('/api/admin/reports/:id', (req, res) => {
   if (!requireAdmin(req,res)) return;
   const report = db.prepare('SELECT * FROM reports WHERE id=?').get(req.params.id);
@@ -1061,13 +1096,14 @@ app.get('/uploads/:filename', (req, res) => {
   if (!image) return res.sendStatus(404);
   if (image.seller_closed) return res.sendStatus(404);
   const user = currentUser(req);
-  if (image.status === 'expired' && user?.id !== image.seller_id) return res.sendStatus(404);
+  if (['expired','removed'].includes(image.status) && user?.id !== image.seller_id && user?.role !== 'admin') return res.sendStatus(404);
   if (image.kind === 'donation' && !user?.support_verified && user?.id !== image.seller_id) return res.sendStatus(404);
   if (image.kind === 'donation' && user && image.university !== user.university && user.id !== image.seller_id) return res.sendStatus(404);
-  res.setHeader('Cache-Control',image.kind==='donation'?'private, no-store':'public, max-age=86400');
+  res.setHeader('Cache-Control',image.kind==='donation'||image.status!=='active'?'private, no-store':'public, max-age=86400');
   res.sendFile(path.join(uploadDir,req.params.filename));
 });
 app.use('/api', (req,res) => fail(res,404,'API yolu bulunamadı.'));
+app.use('/university-logos',express.static(path.join(root,'public','university-logos'),{maxAge:'7d',fallthrough:false}));
 app.use(express.static(path.join(root,'public')));
 app.use((req, res) => res.sendFile(path.join(root,'public','index.html')));
 app.use((err, req, res, next) => {

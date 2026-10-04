@@ -299,6 +299,12 @@ test('öğrenci pazarı ve Dayanışma akışları', async t => {
   assert.equal((await request('/api/login','POST',{email:'seller@example.com',password:'strong-password-123'})).status,401);
   assert.equal((await request('/api/login','POST',{email:'new-seller@example.com',password:'strong-password-123'})).status,200);
   const expiredCover=(await request(`/api/listings/${freeSale.data.id}`,'GET',null,seller)).data.listing.images[0].filename;
+  assert.equal((await request('/api/admin/support/'+buyer.id,'DELETE',{confirmation:true},regular)).status,403);
+  assert.equal((await request('/api/admin/support/'+buyer.id,'DELETE',{},admin)).status,400);
+  assert.equal((await request('/api/admin/support/'+buyer.id,'DELETE',{confirmation:true},admin)).status,200);
+  assert.equal((await request('/api/me','GET',null,buyer)).data.user.needsSupport,false);
+  assert.ok(!(await request('/api/admin/queue','GET',null,admin)).data.support.some(a=>a.user_id===buyer.id));
+  assert.equal((await request('/api/admin/support/'+buyer.id,'DELETE',{confirmation:true},admin)).status,404);
   const testDb=new DatabaseSync(path.join(temp,'data','unipazar.sqlite'));
   testDb.prepare("UPDATE listings SET created_at=datetime('now','-181 days') WHERE id=?").run(freeSale.data.id);
   testDb.prepare("UPDATE listings SET created_at=datetime('now','-181 days') WHERE id=?").run(donated.data.id);
@@ -329,6 +335,17 @@ test('öğrenci pazarı ve Dayanışma akışları', async t => {
   assert.equal((await request(`/api/conversations/${conversation.data.id}/messages`,'POST',{body:'Merhaba'},buyer)).status,409);
   assert.equal((await request(`/api/admin/accounts/${seller.id}`,'PATCH',{closed:false},admin)).status,200);
   assert.equal((await request('/api/login','POST',{email:'new-seller@example.com',password:'strong-password-123'})).status,200);
+  const securityResponse=await fetch(base+'/api/me',{headers:{cookie:buyer.cookie}});
+  assert.match(securityResponse.headers.get('cache-control'),/no-store/);
+  assert.equal(securityResponse.headers.get('x-frame-options'),'DENY');
+  assert.equal((await fetch(base+'/api/reports',{method:'POST',headers:{cookie:buyer.cookie,'Origin':'https://evil.example','Content-Type':'application/json'},body:'{}'})).status,403);
+  for(const endpoint of ['/api/listings/'+id,'/api/conversations/'+conversation.data.id+'/messages']){
+    assert.equal((await fetch(base+endpoint,{method:endpoint.includes('messages')?'POST':'PATCH',headers:{'Content-Type':'multipart/form-data; boundary=bad'},body:'invalid upload'})).status,401);
+  }
+  const removedCover=(await request('/api/listings/'+typoCreated.data.id,'GET',null,admin)).data.listing.images[0].filename;
+  await request('/api/listings/'+typoCreated.data.id,'PATCH',{status:'removed'},admin);
+  assert.equal((await fetch(base+'/uploads/'+removedCover)).status,404);
+  assert.equal((await fetch(base+'/uploads/'+removedCover,{headers:{cookie:admin.cookie}})).status,200);
   const secondAdmin=spawnSync(process.execPath,['scripts/grant-admin.js','buyer@gmail.com'],{cwd:process.cwd(),env:{...process.env,DATA_DIR:path.join(temp,'data')},encoding:'utf8'});
   assert.notEqual(secondAdmin.status,0);
   assert.equal((await request('/api/me','DELETE',{confirmation:'wrong'},buyer)).status,400);

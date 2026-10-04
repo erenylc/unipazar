@@ -18,3 +18,5 @@ body{background-image:url('/turkiye-history-pattern.svg');background-size:480px 
 .bubble:not(.mine) .message-menu>div{left:0;right:auto}.message-menu.upward>div{top:auto;bottom:calc(100% + 6px)}html[data-theme=dark] .message-menu>div{background:#343348;color:#f1edff;border-color:#565168}html[data-theme=dark] .message-menu button:hover{background:#49435e}html[data-theme=dark] .message-menu button[data-action="delete-message"]{color:#ff9ea8}
 
 body{background-size:560px 420px}html[data-theme=dark] body{background-image:url('/turkiye-history-pattern-dark.svg');background-size:560px 420px}
+
+body{background-image:url('/study-pattern.svg');background-size:600px 440px}html[data-theme=dark] body{background-image:url('/study-pattern-dark.svg');background-size:600px 440px}
