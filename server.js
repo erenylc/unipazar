@@ -1,6 +1,7 @@
 import {validateRegistration} from './public/registration-validation.js';
 import {brevoConfigured, sendBrevoVerificationCode, sendBrevoTextEmail} from './email-delivery.js';
 import express from 'express';
+import compression from 'compression';
 import multer from 'multer';
 import {preparePhoto, MAX_PHOTO_BYTES} from './image-upload.js';
 import {legalDocuments, validateLegalAcceptance} from './legal-documents.js';
@@ -107,6 +108,8 @@ CREATE TABLE IF NOT EXISTS support_applications (
  submitted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, reviewed_at TEXT
 );
 CREATE INDEX IF NOT EXISTS listings_scope ON listings(university,campus,status,created_at);
+CREATE INDEX IF NOT EXISTS listings_recent ON listings(status,kind,created_at DESC);
+CREATE INDEX IF NOT EXISTS listings_university_recent ON listings(university,status,kind,created_at DESC);
 CREATE INDEX IF NOT EXISTS messages_conversation ON messages(conversation_id,id);
 CREATE TABLE IF NOT EXISTS google_accounts (
  sub TEXT PRIMARY KEY, user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE
@@ -183,6 +186,9 @@ db.exec('CREATE UNIQUE INDEX IF NOT EXISTS direct_admin_conversation ON conversa
 const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
+app.use(compression({filter(req,res){
+  return req.path!=='/api/message-events' && compression.filter(req,res);
+}}));
 app.use(express.json({ limit: '100kb' }));
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -586,7 +592,7 @@ app.get('/api/listings', (req, res) => {
   }
   if (req.query.maxPrice) { where.push('l.price<=?'); args.push(Number(req.query.maxPrice) * 100); }
   const query = normalizeSearch(clean(req.query.q, 100)).trim();
-  const candidates = db.prepare(`${listingSelect} WHERE ${where.join(' AND ')} ORDER BY l.created_at DESC`).all(...args);
+  const candidates = db.prepare(`${listingSelect} WHERE ${where.join(' AND ')} ORDER BY l.created_at DESC${query ? '' : ' LIMIT 100'}`).all(...args);
   const terms=searchWords(query);
   const rows = (terms.length ? candidates.map(row=>({row,score:listingSearchScore(row,query,terms)})).filter(item=>item.score!==null).sort((a,b)=>a.score-b.score).map(item=>item.row) : candidates).slice(0,100);
   const favoriteIds = me ? new Set(db.prepare('SELECT listing_id FROM favorites WHERE user_id=?').all(me.id).map(row=>row.listing_id)) : new Set();
@@ -630,7 +636,10 @@ app.get('/api/users/:id/avatar',(req,res)=>{
  const user=requireUser(req,res);if(!user)return;
  const photo=db.prepare('SELECT avatar_filename FROM users WHERE id=? AND closed_at IS NULL').get(req.params.id)?.avatar_filename;
  if(!photo)return res.sendStatus(404);
- res.set('Cache-Control','private, no-store');res.sendFile(path.resolve(avatarDir,path.basename(photo)));
+ if(req.query.v&&req.query.v!==photo)return res.sendStatus(404);
+ const ownVersionedPhoto=user.id===Number(req.params.id)&&req.query.v===photo;
+ res.set('Cache-Control',ownVersionedPhoto?'private, max-age=31536000, immutable':'private, no-store');
+ res.sendFile(path.resolve(avatarDir,path.basename(photo)));
 });
 
 const voiceType = buffer => buffer.subarray(0,4).equals(Buffer.from([0x1a,0x45,0xdf,0xa3])) ? 'webm' : buffer.subarray(0,4).toString() === 'OggS' ? 'ogg' : buffer.length >= 12 && buffer.subarray(4,8).toString() === 'ftyp' ? 'mp4' : null;

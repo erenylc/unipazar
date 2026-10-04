@@ -108,6 +108,11 @@ test('öğrenci pazarı ve Dayanışma akışları', async t => {
   assert.equal((await fetch(base+savedAvatar.data.user.avatarUrl,{headers:{cookie:buyer.cookie}})).status,200);
   const persistedAvatar=(await request('/api/me','GET',null,seller)).data.user.avatarUrl;
   assert.equal(persistedAvatar,savedAvatar.data.user.avatarUrl);
+  const cachedAvatar=await fetch(base+persistedAvatar,{headers:{cookie:seller.cookie}});
+  assert.equal(cachedAvatar.status,200);
+  assert.match(cachedAvatar.headers.get('cache-control'),/private, max-age=31536000, immutable/);
+  assert.equal((await fetch(base+persistedAvatar.replace(/v=.*/, 'v=obsolete'),{headers:{cookie:seller.cookie}})).status,404);
+  assert.match((await fetch(base+persistedAvatar,{headers:{cookie:buyer.cookie}})).headers.get('cache-control'),/no-store/);
   assert.equal((await request('/api/me/avatar','DELETE',null,seller)).data.user.avatarUrl,null);
   assert.equal((await fetch(base+persistedAvatar,{headers:{cookie:buyer.cookie}})).status,404);
   assert.equal((await request('/api/conversations/'+directId+'/clear','POST',{confirmation:true},outsider)).status,404);

@@ -7,5 +7,5 @@ export const chatIcons={
 };
 export function avatarMarkup(name,url,className='avatar'){
  const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
- return `<span class="${className}">${url?`<img src="${esc(url)}" alt="${esc(name)} profil fotoğrafı" loading="lazy">`:esc(name?.[0]?.toLocaleUpperCase('tr-TR')||'?')}</span>`;
+ return `<span class="${className}">${url?`<img src="${esc(url)}" alt="${esc(name)} profil fotoğrafı" loading="eager" decoding="async">`:esc(name?.[0]?.toLocaleUpperCase('tr-TR')||'?')}</span>`;
 }
