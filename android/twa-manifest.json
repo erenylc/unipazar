@@ -20,8 +20,8 @@
     "path": "android.keystore",
     "alias": "unisatis"
   },
-  "appVersionName": "1.0.1",
-  "appVersionCode": 2,
+  "appVersionName": "1.0.2",
+  "appVersionCode": 3,
   "shortcuts": [],
   "generatorApp": "unknown",
   "webManifestUrl": "https://unipazar-production.up.railway.app/manifest.webmanifest",
@@ -43,5 +43,5 @@
   "fileHandlers": [],
   "launchHandlerClientMode": "",
   "displayOverride": [],
-  "appVersion": "1.0.1"
+  "appVersion": "1.0.2"
 }

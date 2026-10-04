@@ -30,6 +30,8 @@
 
     
 
+    <queries><package android:name="com.android.chrome" /></queries>
+
     <application
         android:name="Application"
         android:allowBackup="true"

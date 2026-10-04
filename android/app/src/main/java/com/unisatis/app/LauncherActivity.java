@@ -16,14 +16,30 @@
 package com.unisatis.app;
 
 import android.content.pm.ActivityInfo;
+import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import com.google.androidbrowserhelper.trusted.TwaLauncher;
 
 
 
 public class LauncherActivity
         extends com.google.androidbrowserhelper.trusted.LauncherActivity {
+
+    @Override
+    protected TwaLauncher createTwaLauncher() {
+        // Samsung Internet may force a dark palette over the site's own light theme.
+        // Chrome respects the page's color-scheme setting. Keep the normal provider
+        // selection on devices where Chrome is unavailable or disabled.
+        try {
+            if (getPackageManager().getApplicationInfo("com.android.chrome", 0).enabled) {
+                return new TwaLauncher(this, "com.android.chrome", getTaskId());
+            }
+        } catch (PackageManager.NameNotFoundException ignored) {
+        }
+        return super.createTwaLauncher();
+    }
     
 
     

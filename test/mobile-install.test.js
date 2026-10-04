@@ -59,7 +59,8 @@ test('Android Digital Asset Links serves the configured signing fingerprint',asy
  const [statement]=await response.json();
  assert.deepEqual(statement.relation,['delegate_permission/common.handle_all_urls']);
  assert.equal(statement.target.package_name,'com.unisatis.app');
- assert.deepEqual(statement.target.sha256_cert_fingerprints,[fingerprint]);
+ assert.ok(statement.target.sha256_cert_fingerprints.includes(fingerprint));
+ assert.ok(statement.target.sha256_cert_fingerprints.includes('74:98:7F:18:19:17:39:56:26:D6:96:AF:1A:9E:B6:C9:F2:BC:DA:F6:D7:57:0E:9A:EF:86:4E:18:F8:94:44:E9'));
  const contact=await fetch(`http://127.0.0.1:${port}/api/public-contact`);
  assert.equal(contact.status,200);
  assert.deepEqual(await contact.json(),{email:'unisatis06@gmail.com'});
