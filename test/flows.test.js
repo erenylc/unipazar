@@ -175,6 +175,9 @@ test('öğrenci pazarı ve Dayanışma akışları', async t => {
   assert.equal((await request(`/api/users/${seller.id}/block`,'DELETE',null,buyer)).status,200);
   const firstMessage=await request(`/api/conversations/${conversation.data.id}/messages`,'POST',{body:'Merhaba, ürün hâlâ mevcut mu?'},buyer);
   assert.equal(firstMessage.status,201);
+  assert.equal((await request('/api/reports','POST',{conversationId:conversation.data.id,reason:'Kullanıcı şikâyeti'},admin)).status,404);
+  assert.equal((await request('/api/reports','POST',{conversationId:conversation.data.id,reason:'Kullanıcı şikâyeti'},buyer)).status,201);
+  assert.ok((await request('/api/admin/queue','GET',null,admin)).data.reports.some(report=>report.conversation_id===conversation.data.id && !report.message_id && report.reason==='Kullanıcı şikâyeti'));
   assert.equal((await request('/api/reports','POST',{messageId:firstMessage.data.id,reason:'Uygunsuz mesaj'},outsider)).status,404);
   assert.equal((await request('/api/reports','POST',{messageId:firstMessage.data.id,reason:'Uygunsuz mesaj'},buyer)).status,404);
   assert.equal((await request('/api/reports','POST',{messageId:firstMessage.data.id,reason:'Uygunsuz mesaj'},seller)).status,201);

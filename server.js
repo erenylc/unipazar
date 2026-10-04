@@ -127,6 +127,7 @@ CREATE TABLE IF NOT EXISTS blocked_users (
  PRIMARY KEY(blocker_id,blocked_id), CHECK(blocker_id<>blocked_id)
 );
 `);
+if (!db.prepare('PRAGMA table_info(reports)').all().some(column=>column.name==='conversation_id'))db.exec('ALTER TABLE reports ADD COLUMN conversation_id INTEGER REFERENCES conversations(id)');
 if (!db.prepare('PRAGMA table_info(users)').all().some(column=>column.name==='avatar_filename'))db.exec('ALTER TABLE users ADD COLUMN avatar_filename TEXT');
 db.exec('CREATE TABLE IF NOT EXISTS conversation_views (user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE, cleared_through INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(user_id,conversation_id))');
 if (!db.prepare("PRAGMA table_info(users)").all().some(column => column.name === 'need_expires_at')) {
@@ -448,6 +449,7 @@ app.delete('/api/me', (req,res) => {
     db.prepare(`DELETE FROM reports WHERE reporter_id=? OR listing_id IN (SELECT id FROM listings WHERE seller_id=?)
       OR message_id IN (SELECT id FROM messages WHERE sender_id=? OR conversation_id IN
       (SELECT id FROM conversations WHERE buyer_id=? OR seller_id=?))`).run(user.id,user.id,user.id,user.id,user.id);
+    db.prepare('DELETE FROM reports WHERE conversation_id IN (SELECT id FROM conversations WHERE buyer_id=? OR seller_id=?)').run(user.id,user.id);
     db.prepare('DELETE FROM admin_message_reviews WHERE conversation_id IN (SELECT id FROM conversations WHERE buyer_id=? OR seller_id=?)').run(user.id,user.id);
     db.prepare('DELETE FROM handoffs WHERE proposed_by=? OR conversation_id IN (SELECT id FROM conversations WHERE buyer_id=? OR seller_id=?)').run(user.id,user.id,user.id);
     db.prepare('DELETE FROM messages WHERE sender_id=? OR conversation_id IN (SELECT id FROM conversations WHERE buyer_id=? OR seller_id=?)').run(user.id,user.id,user.id);
@@ -928,9 +930,13 @@ app.patch('/api/donation-requests/:id', (req, res) => {
 });
 app.post('/api/reports', (req, res) => {
   const user = requireUser(req,res); if (!user) return;
-  const reason = clean(req.body.reason,500), listingId = Number(req.body.listingId), messageId=Number(req.body.messageId);
+  const reason = clean(req.body.reason,500), listingId = Number(req.body.listingId), messageId=Number(req.body.messageId),conversationId=Number(req.body.conversationId);
   if(!reason)return fail(res,400,'Şikâyet nedeni gerekli.');
-  if(messageId){
+  if(conversationId){
+    const conversation=db.prepare('SELECT buyer_id,seller_id FROM conversations WHERE id=?').get(conversationId);
+    if(!conversation||![conversation.buyer_id,conversation.seller_id].includes(user.id))return fail(res,404,'Sohbet bulunamadı.');
+    db.prepare('INSERT INTO reports(reporter_id,conversation_id,reason) VALUES(?,?,?)').run(user.id,conversationId,reason);
+  }else if(messageId){
     const message=db.prepare('SELECT m.sender_id,c.buyer_id,c.seller_id FROM messages m JOIN conversations c ON c.id=m.conversation_id WHERE m.id=?').get(messageId);
     if(!message || ![message.buyer_id,message.seller_id].includes(user.id) || message.sender_id===user.id)return fail(res,404,'Mesaj bulunamadı.');
     db.prepare('INSERT INTO reports(reporter_id,message_id,reason) VALUES(?,?,?)').run(user.id,messageId,reason);
@@ -942,7 +948,7 @@ app.post('/api/reports', (req, res) => {
 });
 app.get('/api/admin/queue', (req, res) => {
   if (!requireAdmin(req,res)) return;
-  res.json({ support:db.prepare("SELECT a.user_id,a.reason,a.family_income,a.identity_last4,a.status,a.submitted_at,a.reviewed_at,u.name,u.email,u.phone,u.university,u.email_verified,u.created_at FROM support_applications a JOIN users u ON u.id=a.user_id WHERE u.closed_at IS NULL ORDER BY CASE WHEN a.status='pending' THEN 0 ELSE 1 END,a.submitted_at DESC").all(), reports:db.prepare("SELECT r.*,m.conversation_id,m.sender_id AS message_sender_id FROM reports r LEFT JOIN messages m ON m.id=r.message_id WHERE r.status='open' ORDER BY r.id DESC").all() });
+  res.json({ support:db.prepare("SELECT a.user_id,a.reason,a.family_income,a.identity_last4,a.status,a.submitted_at,a.reviewed_at,u.name,u.email,u.phone,u.university,u.email_verified,u.created_at FROM support_applications a JOIN users u ON u.id=a.user_id WHERE u.closed_at IS NULL ORDER BY CASE WHEN a.status='pending' THEN 0 ELSE 1 END,a.submitted_at DESC").all(), reports:db.prepare("SELECT r.*,COALESCE(r.conversation_id,m.conversation_id) AS conversation_id,m.sender_id AS message_sender_id FROM reports r LEFT JOIN messages m ON m.id=r.message_id WHERE r.status='open' ORDER BY r.id DESC").all() });
 });
 app.get('/api/messages/:id/voice', (req,res) => {
   const user=requireUser(req,res);if(!user)return;
