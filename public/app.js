@@ -664,6 +664,7 @@ document.addEventListener('click',async event=>{
  if(target){event.preventDefault();document.querySelectorAll('.message-menu[open]').forEach(menu=>menu.removeAttribute('open')); const action=target.dataset.action,id=target.dataset.id;
   try{
    if(action==='close-modal') return closeModal();
+   if(action==='reload-app'){location.reload();return;}
    if(action==='seller-listings'){closeModal();go('/seller/'+id);return;}
    if(action==='report-conversation')return showSimpleModal('Kullanıcıyı şikâyet et','Şikâyetin yöneticinin inceleme listesine gönderilecek.',`<form data-form="report-conversation" data-id="${id}"><div class="field"><label for="conversationReportReason">Şikâyet nedeni</label><textarea id="conversationReportReason" name="reason" maxlength="500" required></textarea></div><button class="btn btn-primary">Şikâyeti gönder</button></form>`);
    if(action==='conversation-options')return showConversationOptions(Number(id));
@@ -844,5 +845,5 @@ document.addEventListener('focusin',prefetchListing);
 document.addEventListener('touchstart',prefetchListing,{passive:true});
 window.addEventListener('hashchange',()=>{const nextRoute=route();window.scrollTo(0,0);if(state.modal==='camera')closeModal();if(nextRoute!=='/messages')discardVoiceRecording();if(nextRoute==='/messages'&&previousRoute!=='/messages'&&!state.openConversationOnNavigation)state.selectedConversation=null;state.openConversationOnNavigation=false;previousRoute=nextRoute;render();});
 if(!location.hash)history.replaceState(null,'',location.pathname+location.search+'#/');
-refreshUser().then(()=>{refreshUnread().catch(()=>{});if(!state.user && accountRoutes.has(route()))history.replaceState(null,'',location.pathname+location.search+'#/');render();}).catch(error=>toast(error.message));
+refreshUser().then(()=>{refreshUnread().catch(()=>{});if(!state.user && accountRoutes.has(route()))history.replaceState(null,'',location.pathname+location.search+'#/');render();}).catch(error=>{pageFrame(`<main class="shell page"><section class="panel"><h2>Bağlantı kurulamadı</h2><p>İnternet bağlantını kontrol edip tekrar deneyebilirsin.</p><button class="btn btn-primary" data-action="reload-app">Tekrar dene</button></section></main>`,route());toast(error.message);});
 setInterval(()=>{if(state.user && !document.hidden) refreshUnread().catch(()=>{});},15000);
