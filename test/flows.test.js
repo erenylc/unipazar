@@ -98,6 +98,28 @@ test('öğrenci pazarı ve Dayanışma akışları', async t => {
   assert.equal((await request('/api/me','GET',null,remembered)).data.user,null);
   assert.equal((await request('/api/listings','POST',{},seller)).status,400);
   const image=new Blob([Uint8Array.from([137,80,78,71,13,10,26,10,0])],{type:'image/png'});
+  const avatar=new FormData();avatar.append('photo',image,'avatar.png');
+  assert.equal((await request('/api/me/avatar','POST',avatar)).status,401);
+  const invalidAvatar=new FormData();invalidAvatar.append('photo',new Blob(['not-image']),'fake.png');
+  assert.equal((await request('/api/me/avatar','POST',invalidAvatar,seller)).status,400);
+  const savedAvatar=await request('/api/me/avatar','POST',avatar,seller);assert.equal(savedAvatar.status,200);
+  assert.ok(savedAvatar.data.user.avatarUrl);
+  assert.equal((await fetch(base+savedAvatar.data.user.avatarUrl)).status,401);
+  assert.equal((await fetch(base+savedAvatar.data.user.avatarUrl,{headers:{cookie:buyer.cookie}})).status,200);
+  const persistedAvatar=(await request('/api/me','GET',null,seller)).data.user.avatarUrl;
+  assert.equal(persistedAvatar,savedAvatar.data.user.avatarUrl);
+  assert.equal((await request('/api/me/avatar','DELETE',null,seller)).data.user.avatarUrl,null);
+  assert.equal((await fetch(base+persistedAvatar,{headers:{cookie:buyer.cookie}})).status,404);
+  assert.equal((await request('/api/conversations/'+directId+'/clear','POST',{confirmation:true},outsider)).status,404);
+  assert.equal((await request('/api/conversations/'+directId+'/clear','POST',{},buyer)).status,400);
+  assert.equal((await request('/api/conversations/'+directId+'/clear','POST',{confirmation:true},buyer)).status,200);
+  assert.equal((await request('/api/conversations/'+directId+'/messages','GET',null,buyer)).data.messages.length,0);
+  assert.ok((await request('/api/conversations/'+directId+'/messages','GET',null,admin)).data.messages.length>0);
+  await request('/api/conversations/'+directId+'/messages','POST',{body:'Temizlemeden sonra'},admin);
+  assert.deepEqual((await request('/api/conversations/'+directId+'/messages?preview=1','GET',null,buyer)).data.messages.map(m=>m.body),['Temizlemeden sonra']);
+  assert.equal((await request('/api/unread-count','GET',null,buyer)).data.count,1);
+  await request('/api/conversations/'+directId+'/messages','GET',null,buyer);
+
   const sale=new FormData(); for(const [k,v] of Object.entries({kind:'sale',title:'Ders kitabı',description:'Temiz kullanılmış ders kitabı',category:'Ders kitapları',condition:'Az kullanılmış',price:'150'})) sale.set(k,v); sale.append('photos',image,'kitap.png'); sale.append('photos',image,'kitap-arka.png');
   const created=await request('/api/listings','POST',sale,seller); assert.equal(created.status,201);
   const tooManyPhotos=new FormData();for(const [k,v] of Object.entries({kind:'sale',title:'Fazla fotoğraf',description:'Sınır kontrolü',category:'Diğer',condition:'Yeni',price:'10'}))tooManyPhotos.set(k,v);for(let i=0;i<7;i++)tooManyPhotos.append('photos',image,`foto-${i}.png`);

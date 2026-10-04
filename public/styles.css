@@ -122,3 +122,4 @@ html[data-theme=dark] .profile-summary span{color:#ded9ee}html[data-theme=dark] 
 .profile-menu a:focus-visible,.profile-menu button:focus-visible,.language-menu summary:focus-visible{outline:2px solid #8a76c8;outline-offset:-2px}
 html[data-theme=dark] .profile-menu a:hover,html[data-theme=dark] .profile-menu a:focus-visible,html[data-theme=dark] .profile-menu a:active,html[data-theme=dark] .profile-menu button:hover,html[data-theme=dark] .profile-menu button:focus-visible,html[data-theme=dark] .profile-menu button:active,html[data-theme=dark] .language-menu summary:hover{background:#3b3455;color:#fff}
 html[data-theme=dark] .profile-menu button.profile-logout:hover,html[data-theme=dark] .profile-menu button.profile-logout:focus-visible,html[data-theme=dark] .profile-menu button.profile-logout:active{background:#422b3b;color:#ffb0b9}
+html[data-theme=light]{color-scheme:only light}

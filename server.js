@@ -26,6 +26,8 @@ const dataDir = process.env.DATA_DIR || path.join(root, 'data');
 const uploadDir = process.env.UPLOAD_DIR || path.join(root, 'uploads');
 const messageUploadDir = path.join(dataDir, 'message-photos');
 const voiceUploadDir = path.join(dataDir, 'message-voice');
+const avatarDir = path.join(dataDir, 'profile-photos');
+fs.mkdirSync(avatarDir, { recursive: true });
 fs.mkdirSync(dataDir, { recursive: true });
 fs.mkdirSync(uploadDir, { recursive: true });
 fs.mkdirSync(messageUploadDir, { recursive: true });
@@ -125,6 +127,8 @@ CREATE TABLE IF NOT EXISTS blocked_users (
  PRIMARY KEY(blocker_id,blocked_id), CHECK(blocker_id<>blocked_id)
 );
 `);
+if (!db.prepare('PRAGMA table_info(users)').all().some(column=>column.name==='avatar_filename'))db.exec('ALTER TABLE users ADD COLUMN avatar_filename TEXT');
+db.exec('CREATE TABLE IF NOT EXISTS conversation_views (user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE, cleared_through INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(user_id,conversation_id))');
 if (!db.prepare("PRAGMA table_info(users)").all().some(column => column.name === 'need_expires_at')) {
   db.exec('ALTER TABLE users ADD COLUMN need_expires_at INTEGER');
 }
@@ -245,7 +249,7 @@ const verifyPassword = async (password, stored) => {
 };
 const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res)).catch(next);
 const fail = (res, code, error) => res.status(code).json({ error });
-const publicUser = user => user && ({ id: user.id, name: user.name, email: user.email, phone:user.phone || '', university: user.university, emailVerified: !!user.email_verified, studentStatus: user.student_status, needsSupport: !!user.support_verified, supportStatus:db.prepare('SELECT status FROM support_applications WHERE user_id=?').get(user.id)?.status || 'none', role: user.role });
+const publicUser = user => user && ({ id: user.id, name: user.name, email: user.email, phone:user.phone || '', avatarUrl:user.avatar_filename?'/api/users/'+user.id+'/avatar?v='+encodeURIComponent(user.avatar_filename):null, university: user.university, emailVerified: !!user.email_verified, studentStatus: user.student_status, needsSupport: !!user.support_verified, supportStatus:db.prepare('SELECT status FROM support_applications WHERE user_id=?').get(user.id)?.status || 'none', role: user.role });
 const currentUser = req => {
   const token = /(?:^|; )up_session=([^;]+)/.exec(req.headers.cookie || '')?.[1];
   if (!token) return null;
@@ -456,6 +460,7 @@ app.delete('/api/me', (req,res) => {
     db.prepare('DELETE FROM users WHERE id=?').run(user.id);
   });
   const removeStoredFile=(dir,name)=>{if(name&&path.basename(name)===name)fs.rmSync(path.join(dir,name),{force:true});};
+  removeStoredFile(avatarDir,user.avatar_filename);
   for(const photo of listingPhotos)removeStoredFile(uploadDir,photo.filename);
   for(const message of messageFiles){removeStoredFile(messageUploadDir,message.photo_filename);removeStoredFile(voiceUploadDir,message.voice_filename);}
   for(const response of messageStreams.get(user.id)||[])response.end();messageStreams.delete(user.id);
@@ -585,12 +590,34 @@ app.get('/api/listings/:id', (req, res) => {
   res.json({ listing: { ...row, images, favorite } });
 });
 app.get('/api/sellers/:id/listings', (req, res) => {
-  const seller = db.prepare('SELECT id,name,university FROM users WHERE id=? AND closed_at IS NULL').get(req.params.id);
+  const seller = db.prepare('SELECT id,name,university,avatar_filename FROM users WHERE id=? AND closed_at IS NULL').get(req.params.id);
   if (!seller) return fail(res,404,'Satıcı bulunamadı.');
   const listings = db.prepare(`${listingSelect} WHERE l.seller_id=? AND l.kind='sale' AND l.status='active' ORDER BY l.created_at DESC`).all(seller.id);
-  res.json({ seller, listings });
+  seller.avatarUrl=seller.avatar_filename?'/api/users/'+seller.id+'/avatar?v='+encodeURIComponent(seller.avatar_filename):null;delete seller.avatar_filename;res.json({ seller, listings });
 });
 const upload = multer({ storage: multer.memoryStorage(), limits: { files: 6, fileSize: MAX_PHOTO_BYTES } });
+app.post('/api/me/avatar', (req,res,next)=>{if(requireUser(req,res))next();}, upload.single('photo'), async(req,res)=>{
+ const user=currentUser(req);if(!req.file)return fail(res,400,'Bir profil fotoğrafı seç.');
+ let photo;try{photo=await preparePhoto(req.file);}catch(error){return fail(res,400,error.message);}
+ const filename=randomBytes(16).toString('hex')+'.'+photo.type;
+ fs.writeFileSync(path.join(avatarDir,filename),photo.buffer);
+ try{db.prepare('UPDATE users SET avatar_filename=? WHERE id=?').run(filename,user.id);}catch(error){fs.rmSync(path.join(avatarDir,filename),{force:true});throw error;}
+ if(user.avatar_filename)fs.rmSync(path.join(avatarDir,path.basename(user.avatar_filename)),{force:true});
+ res.json({user:publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(user.id))});
+});
+app.delete('/api/me/avatar',(req,res)=>{
+ const user=requireUser(req,res);if(!user)return;
+ db.prepare('UPDATE users SET avatar_filename=NULL WHERE id=?').run(user.id);
+ if(user.avatar_filename)fs.rmSync(path.join(avatarDir,path.basename(user.avatar_filename)),{force:true});
+ res.json({user:publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(user.id))});
+});
+app.get('/api/users/:id/avatar',(req,res)=>{
+ const user=requireUser(req,res);if(!user)return;
+ const photo=db.prepare('SELECT avatar_filename FROM users WHERE id=? AND closed_at IS NULL').get(req.params.id)?.avatar_filename;
+ if(!photo)return res.sendStatus(404);
+ res.set('Cache-Control','private, no-store');res.sendFile(path.resolve(avatarDir,path.basename(photo)));
+});
+
 const voiceType = buffer => buffer.subarray(0,4).equals(Buffer.from([0x1a,0x45,0xdf,0xa3])) ? 'webm' : buffer.subarray(0,4).toString() === 'OggS' ? 'ogg' : buffer.length >= 12 && buffer.subarray(4,8).toString() === 'ftyp' ? 'mp4' : null;
 app.post('/api/listings', (req,res,next)=>{
   const user=requireUser(req,res);if(!user)return;
@@ -695,14 +722,17 @@ app.post('/api/listings/:id/conversation', (req, res) => {
 });
 app.get('/api/conversations', (req, res) => {
   const user = requireUser(req,res); if (!user) return;
-  const rows = db.prepare(`SELECT c.id,c.listing_id,COALESCE(l.title,'Yönetim mesajı') AS title,l.status,u.id AS other_id,u.name AS other_name,u.university AS other_university,
+  const rows = db.prepare(`SELECT c.id,c.listing_id,COALESCE(l.title,'Yönetim mesajı') AS title,l.status,u.id AS other_id,u.name AS other_name,u.university AS other_university,u.avatar_filename AS other_avatar,
     (SELECT CASE WHEN m.voice_filename IS NOT NULL THEN CASE WHEN m.body='' THEN '🎤 Sesli mesaj' ELSE '🎤 ' || m.body END WHEN m.photo_filename IS NOT NULL THEN CASE WHEN m.body='' THEN '📷 Fotoğraf' ELSE '📷 ' || m.body END ELSE m.body END FROM messages m WHERE m.conversation_id=c.id ORDER BY id DESC LIMIT 1) AS last_message,
     (SELECT created_at FROM messages m WHERE m.conversation_id=c.id ORDER BY id DESC LIMIT 1) AS last_at,
     (SELECT COUNT(*) FROM messages m WHERE m.conversation_id=c.id AND m.sender_id<>? AND m.read_at IS NULL) AS unread_count
     FROM conversations c LEFT JOIN listings l ON l.id=c.listing_id JOIN users u ON u.id=CASE WHEN c.buyer_id=? THEN c.seller_id ELSE c.buyer_id END
      WHERE (c.buyer_id=? OR c.seller_id=?) AND (c.listing_id IS NULL OR l.kind='sale' OR ?=1 OR l.seller_id=?) ORDER BY COALESCE(last_at,c.created_at) DESC`).all(user.id,user.id,user.id,user.id,user.support_verified,user.id);
   const blockedByMe=db.prepare('SELECT 1 FROM blocked_users WHERE blocker_id=? AND blocked_id=?');
-  res.json({ conversations:rows.map(row=>({...row,blockedByMe:!!blockedByMe.get(user.id,row.other_id),messagesClosed:usersBlocked(user.id,row.other_id)})) });
+  const clearedRows=db.prepare('SELECT conversation_id,cleared_through FROM conversation_views WHERE user_id=?').all(user.id);
+  const clearedMap=new Map(clearedRows.map(row=>[row.conversation_id,row.cleared_through]));
+  for(const row of rows){const cleared=clearedMap.get(row.id);if(cleared){const latest=db.prepare('SELECT id FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT 1').get(row.id);if(!latest||latest.id<=cleared){row.last_message='';row.unread_count=0;}}}
+  res.json({ conversations:rows.map(row=>({...row,other_avatar_url:row.other_avatar?'/api/users/'+row.other_id+'/avatar?v='+encodeURIComponent(row.other_avatar):null,blockedByMe:!!blockedByMe.get(user.id,row.other_id),messagesClosed:usersBlocked(user.id,row.other_id)})) });
 });
 app.get('/api/message-events', (req,res) => {
   const user=requireUser(req,res); if(!user)return;
@@ -728,9 +758,20 @@ app.get('/api/conversations/:id/messages', (req, res) => {
   const user = requireUser(req,res); if (!user) return;
   const conversation = db.prepare('SELECT * FROM conversations WHERE id=?').get(req.params.id);
   if (!conversation || ![conversation.buyer_id,conversation.seller_id].includes(user.id)) return fail(res,404,'Konuşma bulunamadı.');
-  const readResult=db.prepare('UPDATE messages SET read_at=? WHERE conversation_id=? AND sender_id<>? AND read_at IS NULL').run(Date.now(),conversation.id,user.id);
+  const readResult=req.query.preview==='1'?{changes:0}:db.prepare('UPDATE messages SET read_at=? WHERE conversation_id=? AND sender_id<>? AND read_at IS NULL').run(Date.now(),conversation.id,user.id);
   if(readResult.changes)notifyConversation(conversation,user.id);
-  res.json({ messages:db.prepare('SELECT id,sender_id,body,created_at,photo_filename,voice_filename,read_at FROM messages WHERE conversation_id=? ORDER BY id ASC LIMIT 200').all(conversation.id) });
+  const cleared=db.prepare('SELECT cleared_through FROM conversation_views WHERE user_id=? AND conversation_id=?').get(user.id,conversation.id)?.cleared_through||0;
+  res.json({ messages:db.prepare('SELECT id,sender_id,body,created_at,photo_filename,voice_filename,read_at FROM messages WHERE conversation_id=? AND id>? ORDER BY id ASC LIMIT 200').all(conversation.id,cleared) });
+});
+app.post('/api/conversations/:id/clear',(req,res)=>{
+ const user=requireUser(req,res);if(!user)return;
+ const conversation=db.prepare('SELECT * FROM conversations WHERE id=?').get(req.params.id);
+ if(!conversation||![conversation.buyer_id,conversation.seller_id].includes(user.id))return fail(res,404,'Konuşma bulunamadı.');
+ if(req.body?.confirmation!==true)return fail(res,400,'Sohbeti temizlemeyi onayla.');
+ const last=db.prepare('SELECT COALESCE(MAX(id),0) AS id FROM messages WHERE conversation_id=?').get(conversation.id).id;
+ db.prepare('INSERT INTO conversation_views(user_id,conversation_id,cleared_through) VALUES(?,?,?) ON CONFLICT(user_id,conversation_id) DO UPDATE SET cleared_through=excluded.cleared_through').run(user.id,conversation.id,last);
+ db.prepare('UPDATE messages SET read_at=? WHERE conversation_id=? AND sender_id<>? AND read_at IS NULL AND id<=?').run(Date.now(),conversation.id,user.id,last);
+ res.json({ok:true});
 });
 app.post('/api/conversations/:id/messages', upload.fields([{name:'photo',maxCount:1},{name:'voice',maxCount:1}]), async (req, res) => {
   const user = requireUser(req,res); if (!user) return;
