@@ -76,11 +76,13 @@ function mobileNavbar(active,badge){
  const item=(path,label,image,selected,extra='')=>`<a href="#${path}" class="mobile-nav-item ${selected?'active':''} ${extra}" ${selected?'aria-current="page"':''}><span class="mobile-nav-icon">${image}${path==='/messages'?badge:''}</span><span class="mobile-nav-label">${label}</span></a>`;
  return `<nav class="mobile-nav" aria-label="Ana menü">${item('/','Keşfet',navIcons.explore,active==='/')}${item('/messages','Mesajlar',navIcons.messages,active==='/messages')}${item('/sell','İlan ver',navIcons.plus,active==='/sell','mobile-nav-create')}${item('/account','Hesabım',state.user?.avatarUrl?avatarMarkup(state.user.name,state.user.avatarUrl):navIcons.account,['/account','/mine','/favorites','/support','/donation','/admin','/manage'].includes(active))}</nav>`;
 }
+const languageNames={tr:'Türkçe',en:'English',es:'Español',kk:'Қазақша',de:'Deutsch',fr:'Français'};
+const languageFlag=code=>`<img class="language-flag" src="/flags/${code}.svg" alt="" width="22" height="15">`;
 function navbar(active){
   const link=(path,label)=>`<a href="#${path}" class="${active===path?'active':''}">${label}</a>`;
   const badge=state.unreadCount?`<span class="message-badge message-count">${state.unreadCount>99?'99+':state.unreadCount}</span>`:'<span class="message-badge message-count" hidden></span>';
   const supportLink=state.user?.needsSupport?link('/donation','Dayanışma'):'';
-  const profile=state.user?`<div class="profile-menu" hidden><div class="profile-summary"><strong>${escapeHtml(state.user.name)}</strong><span>${escapeHtml(state.user.university)}</span><small>${escapeHtml(state.user.email)}</small></div><a href="#/account">Hesabım</a><a href="#/mine">İlanlarım</a><a href="#/favorites">Favoriler</a><a href="#/support">Destek</a>${state.user.needsSupport?'<a href="#/donation">Dayanışma</a>':''}${state.user.role==='admin'?'<a href="#/admin">Yönetim</a>':''}<details class="language-menu"><summary>🌐 ${translateText('Dil',language)} · ${languages[language]}</summary><div class="language-options">${Object.entries(languages).map(([code,label])=>`<button type="button" data-action="set-language" data-language="${code}" ${code===language?'aria-current="true"':''}>${label}</button>`).join('')}</div></details><button class="profile-logout" data-action="logout">Hesaptan çıkış yap</button></div>`:'';
+  const profile=state.user?`<div class="profile-menu" hidden><div class="profile-summary"><strong>${escapeHtml(state.user.name)}</strong><span>${escapeHtml(state.user.university)}</span><small>${escapeHtml(state.user.email)}</small></div><a href="#/account">Hesabım</a><a href="#/mine">İlanlarım</a><a href="#/favorites">Favoriler</a><a href="#/support">Destek</a>${state.user.needsSupport?'<a href="#/donation">Dayanışma</a>':''}${state.user.role==='admin'?'<a href="#/admin">Yönetim</a>':''}<details class="language-menu"><summary>🌐 ${translateText('Dil',language)} · ${languageFlag(language)} ${languageNames[language]}</summary><div class="language-options">${Object.entries(languages).map(([code,label])=>`<button type="button" data-action="set-language" data-language="${code}" ${code===language?'aria-current="true"':''}>${languageFlag(code)}<span>${languageNames[code]}</span></button>`).join('')}</div></details><button class="profile-logout" data-action="logout">Hesaptan çıkış yap</button></div>`:'';
   return `<header class="topbar"><div class="shell top-inner"><a href="#/" class="brand"><img class="brand-mark" src="/logo-mark.svg" alt="" width="36" height="36">UniSatış</a><nav class="nav">${link('/','Keşfet')}${supportLink}${link('/favorites','Favoriler')}${link('/messages',`Mesajlarım ${badge}`)}${state.user?link('/mine','İlanlarım'):''}${state.user?.role==='admin'?link('/admin','Yönetim'):''}</nav><div class="top-spacer"></div><div class="top-actions"><button type="button" class="theme-toggle" data-action="toggle-theme" aria-label="${theme==='dark'?'Açık moda geç':'Karanlık moda geç'}" title="${theme==='dark'?'Açık mod':'Karanlık mod'}">${themeIcon()}</button><a class="support-entry" href="#/support">Destek</a><button class="btn btn-primary desktop-only" data-action="sell">＋ İlan ver</button><button class="icon-btn account-icon" data-action="account" aria-label="Hesabım" aria-expanded="false">${state.user?.avatarUrl?avatarMarkup(state.user.name,state.user.avatarUrl):icon.user}</button>${profile}</div></div></header>${mobileNavbar(active,badge)}`;
 }
 function footer(){ return `<footer class="footer"><div class="shell footer-inner"><span>© ${new Date().getFullYear()} Üni Satış · Üniversite içinde alışveriş ve dayanışma</span><span>Güvenli buluşmalar için kalabalık ve bilinen noktaları tercih et.</span></div></footer>`; }
@@ -228,10 +230,17 @@ async function switchConversation(id){
 function showProfilePhotoOptions(){
  showSimpleModal('Profil fotoğrafı','Fotoğrafın, giriş yapmış kullanıcılar tarafından profilinde ve sohbetlerinde görülebilir.',`<div class="camera-options"><button type="button" class="btn btn-primary" data-action="profile-camera">Kamerayı aç</button><label class="btn btn-outline camera-gallery">Galeriden seç<input type="file" id="avatarGallery" accept="image/*,.heic,.heif"></label>${state.user.avatarUrl?'<button class="btn btn-danger" data-action="remove-avatar">Fotoğrafı kaldır</button>':''}</div>`);
 }
+async function compactAvatar(file){
+ if(!/^image\/(jpeg|png|webp)$/.test(file.type))return file;
+ try{const bitmap=await createImageBitmap(file);const scale=Math.min(1,768/Math.max(bitmap.width,bitmap.height));const canvas=document.createElement('canvas');canvas.width=Math.round(bitmap.width*scale);canvas.height=Math.round(bitmap.height*scale);const context=canvas.getContext('2d');context.fillStyle='#fff';context.fillRect(0,0,canvas.width,canvas.height);context.drawImage(bitmap,0,0,canvas.width,canvas.height);bitmap.close();const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',.86));return blob?new File([blob],'profile.jpg',{type:'image/jpeg'}):file;}catch{return file;}
+}
+let avatarUploadBusy=false;
 async function uploadAvatar(file){
+ if(avatarUploadBusy)return;
  if(file.size>12*1024*1024){toast('Fotoğraf en fazla 12 MB olabilir.');return;}
- const buttons=document.querySelectorAll('#modal-root input');buttons.forEach(input=>input.disabled=true);
- try{const body=new FormData();body.append('photo',file);const result=await api('/api/me/avatar',{method:'POST',body});state.user=result.user;closeModal();await render();toast('Profil fotoğrafın kaydedildi.');}catch(error){buttons.forEach(input=>input.disabled=false);toast(error.message);}
+ avatarUploadBusy=true;const previousUser=state.user,preview=URL.createObjectURL(file);
+ closeModal();state.user={...state.user,avatarUrl:preview};await render();toast('Profil fotoğrafı kaydediliyor…');
+ try{const body=new FormData();body.append('photo',await compactAvatar(file));const result=await api('/api/me/avatar',{method:'POST',body});if(state.user?.id!==previousUser.id)return;state.user=result.user;await render();toast('Profil fotoğrafın kaydedildi.');}catch(error){if(state.user?.id===previousUser.id){state.user=previousUser;await render();toast(error.message);}}finally{URL.revokeObjectURL(preview);avatarUploadBusy=false;}
 }
 let pressTimer=null,pressOrigin=null;
 document.addEventListener('pointerdown',event=>{
@@ -468,14 +477,19 @@ async function resendVerificationCode(){
   if(error.retryAfter){state.verificationResendEmail=email;state.verificationResendUntil=Date.now()+error.retryAfter*1000;}
  }finally{state.verificationBusy=false;updateVerificationResend();}
 }
-let googleScriptRequest=null;
-async function setupGoogleSignIn(){
- const button=$('#googleSignIn');
+let googleScriptRequest=null,googleNonceRequest=null,googleNonceTime=0;
+function warmGoogleSignIn(){
+ if(!state.googleClientId)return Promise.resolve();
+ if(!googleNonceRequest||Date.now()-googleNonceTime>60000){googleNonceTime=Date.now();googleNonceRequest=api('/api/auth/google/nonce').catch(error=>{googleNonceRequest=null;throw error;});}
  if(!googleScriptRequest)googleScriptRequest=new Promise((resolve,reject)=>{
   if(window.google?.accounts?.id)return resolve();
   const script=document.createElement('script');script.src='https://accounts.google.com/gsi/client';script.async=true;script.onload=resolve;script.onerror=()=>{script.remove();googleScriptRequest=null;reject(new Error('Google yüklenemedi.'));};document.head.append(script);
  });
- const [,challenge]=await Promise.all([googleScriptRequest,api('/api/auth/google/nonce')]);
+ return Promise.all([googleScriptRequest,googleNonceRequest]);
+}
+async function setupGoogleSignIn(){
+ const button=$('#googleSignIn');if(!button||!state.googleClientId)return;
+ const [,challenge]=await warmGoogleSignIn();googleNonceRequest=null;
  if(!button?.isConnected)return;
  window.google.accounts.id.initialize({client_id:state.googleClientId,nonce:challenge.nonce,auto_select:false,button_auto_select:false,callback:async(response)=>{
   try{
@@ -617,7 +631,7 @@ function showRouteLoading(path){
 async function render(){const path=route(),sequence=++navigationSequence;
  const loadingTimer=setTimeout(()=>{if(sequence===navigationSequence&&route()===path)showRouteLoading(path);},120);
  try { const path=route(); if(!state.user && accountRoutes.has(path)){await renderBrowse();showAuth();return;} if(path==='/') await renderBrowse(); else if(path==='/donation') await renderBrowse(true); else if(path.startsWith('/listing/')) {await renderDetail(path.split('/')[2]);decorateDetail();} else if(path.startsWith('/seller/')) await renderSeller(path.split('/')[2]); else if(path==='/sell') renderSellChoice(); else if(path==='/sell-sale') {renderSell();restoreDraft();} else if(path==='/sell-donation') {renderSell('donation');restoreDraft();} else if(path==='/favorites') await renderFavorites(); else if(path.startsWith('/admin-messages/'))await renderAdminMessages(path.split('/')[2],path.split('/')[3]);else if(path.startsWith('/admin-message/')){if(state.user?.role!=='admin'){go('/');return;}state.selectedConversation=Number(path.split('/')[2]);await renderMessages();}else if(path==='/messages') await renderMessages(); else if(path==='/mine') await renderListingsDashboard(); else if(path==='/manage') await renderManage(); else if(path==='/account'){await loadUniversities();renderAccount();} else if(path==='/support') await renderSupport(); else if(path==='/admin') await renderAdmin(); else go('/'); } catch(error){ if(sequence===navigationSequence){toast(error.message);pageFrame(`<main class="shell page">${empty('Sayfa yüklenemedi',error.message)}</main>`,'/');} } finally {clearTimeout(loadingTimer);} }
-async function refreshUser(){const result=await api('/api/me');state.user=result.user;state.emailVerificationAvailable=result.emailVerificationAvailable;state.googleClientId=result.googleClientId||'';state.legalVersion=result.legalVersion||null;connectMessageStream();}
+async function refreshUser(){const result=await api('/api/me');state.user=result.user;state.emailVerificationAvailable=result.emailVerificationAvailable;state.googleClientId=result.googleClientId||'';state.legalVersion=result.legalVersion||null;connectMessageStream();if(!state.user)warmGoogleSignIn().catch(()=>{});}
 async function refreshUnread(){
   state.unreadCount=state.user?(await api('/api/unread-count')).count:0;
   document.querySelectorAll('.message-count').forEach(badge=>{badge.hidden=state.unreadCount===0;badge.textContent=state.unreadCount>99?'99+':String(state.unreadCount);});
