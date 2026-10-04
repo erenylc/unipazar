@@ -31,7 +31,7 @@ function cacheLifetime(url){
  if(url.startsWith('/api/listings?'))return 30000;
  if(/^\/api\/listings\/\d+$/.test(url))return 30000;
  if(url==='/api/mine'||url==='/api/favorites')return 30000;
- if(url==='/api/conversations')return 5000;
+ if(['/api/conversations','/api/admin/queue','/api/admin/accounts','/api/support-application','/api/offers','/api/donation-requests'].includes(url))return 5000;
  return 0;
 }
 let voiceAudioContext=null, voiceAnalyser=null, voiceAnimation=null, voiceStarted=0;
@@ -593,6 +593,15 @@ function decorateDetail(){
  applyLocale($('.detail-side'),language);
 }
 const accountRoutes=new Set(['/favorites','/messages','/mine','/manage','/account','/sell','/sell-sale','/sell-donation','/admin']);
+function warmNavigation(event){
+ const link=event.target.closest('.nav a,.profile-menu a,.mobile-nav a,.support-entry');if(!link)return;
+ const path=link.getAttribute('href')?.slice(1);
+ const endpoints={'/favorites':['/api/favorites'],'/mine':['/api/mine'],'/manage':['/api/mine','/api/offers','/api/donation-requests'],'/messages':['/api/conversations'],'/support':['/api/support-application'],'/admin':['/api/admin/queue','/api/admin/accounts']};
+ if(!state.user||path==='/admin'&&state.user.role!=='admin')return;
+ for(const url of endpoints[path]||[])api(url).catch(()=>{});
+ if(path==='/account')loadUniversities().catch(()=>{});
+}
+for(const event of ['pointerover','focusin','touchstart'])document.addEventListener(event,warmNavigation,{passive:true});
 let navigationSequence=0;
 function showRouteLoading(path){
  const label=path==='/messages'?'Mesajlar':path==='/favorites'?'Favoriler':path==='/mine'?'İlanlarım':path==='/admin'?'Yönetim':'İlanlar';

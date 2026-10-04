@@ -16,3 +16,5 @@ body{background-image:url('/turkiye-history-pattern.svg');background-size:480px 
 .message-menu>div{width:max-content;min-width:150px;max-width:220px;padding:6px;border:1px solid #e1e4df;border-radius:12px;background:#fff;color:#25382f;box-shadow:0 8px 24px #0002;top:calc(100% + 6px);right:0}
 .message-menu button{white-space:nowrap;word-break:normal;overflow-wrap:normal;text-align:left;min-height:38px;width:100%;border-radius:7px;padding:9px 14px;font-size:13px;line-height:1.4}.message-menu button:hover{background:#f0edf8}.message-menu button[data-action="delete-message"]{color:#b42332}
 .bubble:not(.mine) .message-menu>div{left:0;right:auto}.message-menu.upward>div{top:auto;bottom:calc(100% + 6px)}html[data-theme=dark] .message-menu>div{background:#343348;color:#f1edff;border-color:#565168}html[data-theme=dark] .message-menu button:hover{background:#49435e}html[data-theme=dark] .message-menu button[data-action="delete-message"]{color:#ff9ea8}
+
+body{background-size:560px 420px}html[data-theme=dark] body{background-image:url('/turkiye-history-pattern-dark.svg');background-size:560px 420px}
