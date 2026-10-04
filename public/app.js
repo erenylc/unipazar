@@ -429,6 +429,7 @@ function universityPickerForm(){
  return `<div class="field"><label for="universityPickerSearch">Üniversite ara</label><input id="universityPickerSearch" placeholder="Üniversite adı yaz"></div><div class="university-options"><button class="university-option" data-action="select-university" data-university="*">Tüm üniversiteler</button>${state.universities.map((u,index)=>`<button class="university-option" data-action="select-university" data-university="${escapeHtml(u)}">${universityLogo(u,index<12)}<span>${escapeHtml(u)}</span></button>`).join('')}</div>`;
 }
 function drawModal(){
+ document.documentElement.classList.toggle('modal-open',!!state.modal);
  let html='';
  if(state.modal==='auth') html=authModal(state);
  else if(state.modal==='camera') html=`<div class="modal-backdrop"><div class="modal camera-modal" role="dialog" aria-modal="true" aria-label="Fotoğraf gönder"><div class="modal-top"><h2>Fotoğraf gönder</h2><button class="close" data-action="close-modal" aria-label="Kapat">×</button></div><p class="muted">${state.cameraPurpose==='avatar'?'Profil fotoğrafını çekebilir veya galerinden seçebilirsin.':'Ürünün ayrıntısını şimdi çekebilir veya galerinden seçebilirsin.'}</p><div class="camera-options"><button type="button" class="btn btn-primary" id="cameraStart" data-action="camera-start">Kamerayı aç</button><label class="btn btn-outline camera-gallery">Galeriden seç<input id="chatGalleryInput" type="file" accept="image/*,.heic,.heif"></label></div><video id="cameraPreview" autoplay playsinline muted hidden></video><button class="btn btn-primary camera-capture" id="cameraCapture" data-action="camera-capture" hidden>Fotoğrafı çek</button></div></div>`;
@@ -583,7 +584,7 @@ function renderEditPhotos(){
  $('#editPhotoCount').textContent=translateText(`${photos.length}/6 fotoğraf`,language);
  applyLocale(list,language);
 }
-function closeModal(){ stopCamera();clearEditPhotos();state.modal=null; $('#modal-root')?.remove(); }
+function closeModal(){ stopCamera();clearEditPhotos();state.modal=null; $('#modal-root')?.remove();document.documentElement.classList.remove('modal-open'); }
 let detailPhotos=[],detailPhotoIndex=0;
 function showDetailPhoto(index){
  if(!detailPhotos.length)return;
