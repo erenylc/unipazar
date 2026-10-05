@@ -3,6 +3,7 @@ import {brevoConfigured, sendBrevoVerificationCode, sendBrevoTextEmail} from './
 import express from 'express';
 import compression from 'compression';
 import multer from 'multer';
+import sharp from 'sharp';
 import {preparePhoto, MAX_PHOTO_BYTES} from './image-upload.js';
 import {legalDocuments, validateLegalAcceptance} from './legal-documents.js';
 import {verifyGoogleCredential} from './google-login.js';
@@ -1098,7 +1099,8 @@ app.patch('/api/admin/reports/:id', (req, res) => {
   res.json({ ok:true });
 });
 
-app.get('/uploads/:filename', (req, res) => {
+const listingPhotoCache=new Map();
+app.get('/uploads/:filename', async (req, res) => {
   expireListings();
   if (!/^[a-f0-9]{32}\.(jpg|png|webp)$/.test(req.params.filename)) return res.sendStatus(404);
   const image = db.prepare('SELECT l.kind,l.seller_id,l.university,l.status,u.closed_at AS seller_closed FROM listing_images i JOIN listings l ON l.id=i.listing_id JOIN users u ON u.id=l.seller_id WHERE i.filename=?').get(req.params.filename);
@@ -1109,6 +1111,17 @@ app.get('/uploads/:filename', (req, res) => {
   if (image.kind === 'donation' && !user?.support_verified && user?.id !== image.seller_id) return res.sendStatus(404);
   if (image.kind === 'donation' && user && image.university !== user.university && user.id !== image.seller_id) return res.sendStatus(404);
   res.setHeader('Cache-Control',image.kind==='donation'||image.status!=='active'?'private, no-store':'public, max-age=86400');
+  const width=Number(req.query.width);
+  if([160,480,1600].includes(width)){
+    const key=req.params.filename+':'+width;
+    let buffer=listingPhotoCache.get(key);
+    if(!buffer){
+      try{buffer=await sharp(path.join(uploadDir,req.params.filename),{limitInputPixels:60000000}).rotate().resize({width,height:width,fit:'inside',withoutEnlargement:true}).flatten({background:'#fff'}).jpeg({quality:80}).toBuffer();}
+      catch{return res.sendFile(path.join(uploadDir,req.params.filename));}
+      if(buffer.length<1024*1024){if(listingPhotoCache.size>=32)listingPhotoCache.delete(listingPhotoCache.keys().next().value);listingPhotoCache.set(key,buffer);}
+    }
+    return res.type('image/jpeg').send(buffer);
+  }
   res.sendFile(path.join(uploadDir,req.params.filename));
 });
 app.use('/api', (req,res) => fail(res,404,'API yolu bulunamadı.'));

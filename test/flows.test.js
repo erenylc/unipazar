@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import sharp from 'sharp';
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import os from 'node:os';
@@ -97,7 +98,7 @@ test('öğrenci pazarı ve Dayanışma akışları', async t => {
   await request('/api/logout','POST',null,remembered);
   assert.equal((await request('/api/me','GET',null,remembered)).data.user,null);
   assert.equal((await request('/api/listings','POST',{},seller)).status,400);
-  const image=new Blob([Uint8Array.from([137,80,78,71,13,10,26,10,0])],{type:'image/png'});
+  const image=new Blob([await sharp({create:{width:8,height:8,channels:3,background:'#6699aa'}}).png().toBuffer()],{type:'image/png'});
   const avatar=new FormData();avatar.append('photo',image,'avatar.png');
   assert.equal((await request('/api/me/avatar','POST',avatar)).status,401);
   const invalidAvatar=new FormData();invalidAvatar.append('photo',new Blob(['not-image']),'fake.png');
@@ -253,6 +254,11 @@ test('öğrenci pazarı ve Dayanışma akışları', async t => {
   const donationImage=(await request(`/api/listings/${donated.data.id}`,'GET',null,seller)).data.listing.images[0].filename;
   assert.equal((await fetch(base+'/uploads/'+donationImage)).status,404);
   assert.equal((await fetch(base+'/uploads/'+donationImage,{headers:{cookie:seller.cookie}})).status,200);
+  const thumbnail=await fetch(base+'/uploads/'+donationImage+'?width=160',{headers:{cookie:seller.cookie}});
+  assert.equal(thumbnail.status,200);assert.equal(thumbnail.headers.get('content-type'),'image/jpeg');
+  assert.equal(thumbnail.headers.get('cache-control'),'private, no-store');
+  assert.ok((await sharp(Buffer.from(await thumbnail.arrayBuffer())).metadata()).width<=160);
+  assert.equal((await fetch(base+'/uploads/'+donationImage+'?width=160')).status,404);
   assert.ok((await request('/api/mine','GET',null,seller)).data.listings.some(item=>item.id===donated.data.id));
   assert.equal((await request('/api/listings?kind=donation&q=kitap')).data.listings.length,0);
   assert.equal((await request(`/api/listings/${donated.data.id}/requests`,'POST',{note:'İhtiyacım var'},regular)).status,403);
@@ -272,6 +278,7 @@ test('öğrenci pazarı ve Dayanışma akışları', async t => {
   assert.equal((await request(`/api/listings/${donated.data.id}`,'GET',null,outsider)).status,404);
   assert.equal((await request('/api/listings?kind=donation','GET',null,outsider)).data.listings.length,0);
   assert.equal((await fetch(base+'/uploads/'+donationImage,{headers:{cookie:outsider.cookie}})).status,404);
+  assert.equal((await fetch(base+'/uploads/'+donationImage+'?width=160',{headers:{cookie:outsider.cookie}})).status,404);
   assert.equal((await request('/api/me/support-mode','PATCH',{needsSupport:true},regular)).status,404);
   assert.equal((await request(`/api/listings/${donated.data.id}/requests`,'POST',{note:'Yurt odamda kullanacağım.'},buyer)).status,201);
   const requests=(await request('/api/donation-requests','GET',null,seller)).data.requests;

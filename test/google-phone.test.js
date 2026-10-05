@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import sharp from 'sharp';
 import {spawn} from 'node:child_process';
 import {mkdtempSync,rmSync} from 'node:fs';
 import os from 'node:os';
@@ -37,6 +38,6 @@ test('missing phone blocks selling; first phone can be added without an unusable
  const unblocked=await fetch(base+'/api/listings',{method:'POST',headers:{cookie,'Content-Type':'application/json'},body:'{}'});assert.equal(unblocked.status,400);assert.equal((await unblocked.json()).fields,undefined);
  const listing=new FormData();
  for(const [key,value] of Object.entries({kind:'sale',title:'Ders kitabı',description:'Temiz kitap',category:'Ders kitapları',condition:'Az kullanılmış',price:'100'}))listing.set(key,value);
- listing.append('photos',new Blob([Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l1sAAAAASUVORK5CYII=','base64')],{type:'image/png'}),'book.png');
+ listing.append('photos',new Blob([await sharp({create:{width:8,height:8,channels:3,background:'#6699aa'}}).png().toBuffer()],{type:'image/png'}),'book.png');
  const published=await fetch(base+'/api/listings',{method:'POST',headers:{cookie},body:listing});assert.equal(published.status,201);
 });

@@ -1,4 +1,5 @@
 import convertHeic from 'heic-convert';
+import sharp from 'sharp';
 
 export const MAX_PHOTO_BYTES = 12 * 1024 * 1024;
 
@@ -17,11 +18,18 @@ function isHeic(buffer) {
 export async function preparePhoto(file) {
   if (file.buffer.length > MAX_PHOTO_BYTES) throw new Error('Her fotoğraf en fazla 12 MB olabilir.');
   const type = imageType(file.buffer);
-  if (type) return { buffer: file.buffer, type };
+  if (type) return optimizeStoredPhoto(file.buffer);
   if (!isHeic(file.buffer)) throw new Error('JPG, PNG, WebP veya HEIC fotoğraf yükle.');
   let buffer;
   try { buffer = Buffer.from(await convertHeic({ buffer: file.buffer, format: 'JPEG', quality: 0.8 })); }
   catch { throw new Error('HEIC fotoğraf dönüştürülemedi. Başka bir fotoğraf dene.'); }
   if (imageType(buffer) !== 'jpg' || buffer.length > MAX_PHOTO_BYTES) throw new Error('HEIC fotoğraf işlenemedi. Başka bir fotoğraf dene.');
-  return { buffer, type: 'jpg' };
+  return optimizeStoredPhoto(buffer);
+}
+
+async function optimizeStoredPhoto(buffer){
+ try{
+  const optimized=await sharp(buffer,{limitInputPixels:60000000,failOn:'error'}).rotate().resize({width:1600,height:1600,fit:'inside',withoutEnlargement:true}).flatten({background:'#fff'}).jpeg({quality:82}).toBuffer();
+  return {buffer:optimized,type:'jpg'};
+ }catch{throw new Error('Fotoğraf okunamadı. Geçerli bir JPG, PNG, WebP veya HEIC fotoğraf seç.');}
 }
