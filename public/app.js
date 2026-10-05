@@ -136,6 +136,8 @@ async function renderDetail(id){
   const images=l.images.length?l.images.map(i=>`<img src="/uploads/${encodeURIComponent(i.filename)}" alt="${escapeHtml(l.title)}" loading="lazy">`).join(''):`<div class="placeholder" style="grid-column:1/-1;height:390px">Fotoğraf yok</div>`;
  const mine=state.user?.id===l.seller_id;
   pageFrame(`<main class="shell page"><a class="back-link" href="#${l.kind==='donation'?'/donation':'/'}"><span aria-hidden="true">←</span> İlanlara dön</a><div class="detail" style="margin-top:18px"><div><div class="detail-gallery">${images}</div><div class="panel" style="margin-top:18px"><h2>Ürün açıklaması</h2><p style="white-space:pre-wrap">${escapeHtml(l.description)}</p><div class="rule"></div><div class="inline-actions"><span class="status">${escapeHtml(translateText(l.category,language))}</span><span class="status">${escapeHtml(translateText(l.condition,language))}</span><span class="status">${escapeHtml(l.university)}</span></div></div></div><aside class="panel detail-side" data-listing-status="${escapeHtml(l.status)}"><span class="badge ${l.kind==='donation'?'free':''}">${l.kind==='donation'?'Dayanışma':'İkinci el'}</span><h1>${escapeHtml(l.title)}</h1><div class="detail-price">${l.kind==='donation'?'Ücretsiz':money(l.price)}</div><div class="muted small" style="margin-top:10px">⌖ ${escapeHtml(l.university)}</div><div class="rule"></div><a class="seller seller-link" href="#/seller/${l.seller_id}"><span class="avatar">${escapeHtml(l.seller_name[0]?.toUpperCase())}</span><div><strong>${escapeHtml(l.seller_name)}</strong><div class="muted small">Diğer satış ilanlarını gör →</div></div></a><div class="rule"></div>${l.status!=='active'?`<p class="status">${l.status==='expired'?'Bu ilan 180 günü doldurduğu için yayından kaldırıldı.':`Bu ilan şu an ${listingStatus(l.status).toLocaleLowerCase('tr-TR')}.`}</p>`:mine?`<button class="btn btn-light" data-action="mark-sold" data-id="${l.id}">${l.kind==='donation'?'Verildi':'Satıldı'} olarak işaretle</button>`:l.kind==='donation'?`<button class="btn btn-primary" style="width:100%" data-action="request-donation" data-id="${l.id}">Ürünü talep et</button><p class="small muted">Destek isteyen öğrenciler talep gönderebilir.</p>`:`<button class="btn btn-primary" style="width:100%" data-action="start-chat" data-id="${l.id}">Satıcıya özel mesaj yaz</button>`}<button class="btn btn-light" style="width:100%;margin-top:9px" data-action="favorite" data-id="${l.id}">${l.favorite?'♥ Favorilerden çıkar':'♡ Favorilere ekle'}</button><button class="btn btn-outline" style="width:100%;margin-top:9px" data-action="report" data-id="${l.id}">İlanı bildir</button></aside></div></main>`,l.kind==='donation'?'/donation':'/');
+ const published=new Date(String(l.created_at||'').replace(' ','T')+(/Z$|[+-]\d\d:\d\d$/.test(l.created_at||'')?'':'Z'));
+ if(!Number.isNaN(published.getTime()))$('.detail-side .badge')?.insertAdjacentHTML('afterend',`<time class="listing-published" datetime="${published.toISOString()}" title="Yayın tarihi">${published.toLocaleDateString('tr-TR',{day:'2-digit',month:'2-digit',year:'numeric'})}</time>`);
 }
 function renderSell(kind='sale'){
  if(!state.user){ showAuth(); return; }
@@ -255,7 +257,7 @@ document.addEventListener('toggle',event=>{
  menu.classList.remove('upward');const panel=menu.querySelector('div'),area=menu.closest('.messages');
  if(panel&&area&&panel.getBoundingClientRect().bottom>area.getBoundingClientRect().bottom-8)menu.classList.add('upward');
 },true);
-document.addEventListener('click',event=>{if(!event.target.closest('.message-menu'))document.querySelectorAll('.message-menu[open]').forEach(menu=>menu.open=false);});
+document.addEventListener('click',event=>{for(const selector of ['.message-menu','.category-menu','.language-menu'])document.querySelectorAll(selector+'[open]').forEach(menu=>{if(!menu.contains(event.target))menu.open=false;});});
 document.addEventListener('pointerup',cancelPress);document.addEventListener('pointercancel',cancelPress);document.addEventListener('pointermove',event=>{if(pressOrigin&&Math.hypot(event.clientX-pressOrigin[0],event.clientY-pressOrigin[1])>10)cancelPress();});
 document.addEventListener('input',event=>{if(event.target.matches('.chat-compose [name="body"]')&&chatRenderedId)chatDrafts.set(chatRenderedId,event.target.value);});
 document.addEventListener('change',event=>{if(event.target.id==='avatarGallery'&&event.target.files?.[0])uploadAvatar(event.target.files[0]);});
@@ -439,7 +441,7 @@ function drawModal(){
  setupRegistrationForm();
  setupVerificationResend();
  if(state.modal==='auth' && ['login','register'].includes(state.authTab) && !state.googleProfile && state.googleClientId){
-  $('.auth-tabs').insertAdjacentHTML('beforebegin','<div class="google-auth"><div id="googleSignIn"></div><p class="hint" id="googleSignInStatus" role="status">Google ile giriş yükleniyor…</p></div><div class="auth-divider"><span>veya</span></div>');
+  $('.auth-tabs').insertAdjacentHTML('beforebegin','<div class="google-auth"><div class="google-button-slot"><div class="google-button-placeholder" aria-hidden="true"><span class="google-brand-letter">G</span>Google ile devam edin</div><div id="googleSignIn"></div></div><p class="hint" id="googleSignInStatus" role="status">Google ile giriş yükleniyor…</p></div><div class="auth-divider"><span>veya</span></div>');
   setupGoogleSignIn().catch(()=>{const status=$('#googleSignInStatus');if(status)status.textContent='Google ile giriş yüklenemedi. E-posta ile devam edebilirsin.';});
  }
 }
@@ -490,10 +492,11 @@ function warmGoogleSignIn(){
 }
 async function setupGoogleSignIn(){
  const button=$('#googleSignIn');if(!button||!state.googleClientId)return;
- const [,challenge]=await warmGoogleSignIn();googleNonceRequest=null;
+ const [,challenge]=await warmGoogleSignIn();
  if(!button?.isConnected)return;
  window.google.accounts.id.initialize({client_id:state.googleClientId,nonce:challenge.nonce,auto_select:false,button_auto_select:false,callback:async(response)=>{
   try{
+   googleNonceRequest=null;
    const result=await api('/api/auth/google',{method:'POST',body:{credential:response.credential}});
    if(result.user){state.user=result.user;state.googleProfile=null;connectMessageStream();closeModal();refreshUnread().catch(()=>{});return render();}
    state.googleProfile=result.profile;state.authTab='register';drawModal();
