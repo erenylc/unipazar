@@ -10,7 +10,7 @@
     "dev": "node --watch server.js --local",
     "start": "node server.js",
     "admin:grant": "node scripts/grant-admin.js",
-    "check": "node --check server.js && node --check public/app.js && node --check public/auth-templates.js && node --check public/i18n.js && node --check public/i18n-extra.js && node --check public/install.js && node --check public/sw.js",
+    "check": "node --check server.js && node --check app-assistant.js && node --check photo-moderation.js && node --check public/app.js && node --check public/assistant.js && node --check public/photo-check.js && node --check public/help-topics.js && node --check public/auth-templates.js && node --check public/i18n.js && node --check public/i18n-extra.js && node --check public/install.js && node --check public/sw.js",
     "test": "node --test"
   },
   "dependencies": {

@@ -59,6 +59,19 @@ Bu sürüm üniversite bazlı pilot içindir. “Beni hatırla” seçiliyse otu
 
 ## Kontrol
 
+### Uygulama asistanı ve fotoğraf denetimi
+
+Web ve Android TWA aynı sağ alt yardım asistanını kullanır. Yardım bilgileri `public/help-topics.js` içindedir. Anahtar olmadan konu eşleştirmesiyle uygulama yardımı verir. OpenAI bağlanınca Responses API yalnızca yardım konusu seçer; kullanıcıya üretilmiş serbest metin yerine bu dosyadaki uygulama bilgileri gösterilir. Hesap kayıtları, özel mesajlar ve başvurular servise verilmez. Soru başına 600 karakter, IP başına dakikada 12 istek, en fazla 4 eşzamanlı yanıt ve varsayılan günde 200 AI isteği sınırı vardır; günlük sınır sonrası yerel yardım devam eder. Günlük sayaç tek sunucu süreci içindir ve yeniden başlatılınca sıfırlanır.
+
+1. `OPENAI_API_KEY` değerini yerel `.env` dosyasına veya Railway'nin gizli ortam değişkenlerine ekle. Anahtarı kaynak koda, tarayıcıya, APK'ya veya Git'e koyma.
+2. `APP_ASSISTANT_MODEL=gpt-4.1-mini` ve isteğe bağlı `APP_ASSISTANT_DAILY_LIMIT=200` ayarla. Soru yanıtları için API kullanım ücreti oluşabilir.
+3. Fotoğraf denetimini etkinleştirmek için `PHOTO_MODERATION_ENABLED=1` ayarla ve sunucuyu yeniden başlat. Varsayılan `0`: **otomatik içerik denetimi kapalıdır**. Anahtar eksikken denetim yapılmış gibi gösterilmez.
+4. Etkinleştirince fotoğraf seçiminde kontrol başlar; ilan oluşturma/düzenleme ve profil kaydetmede sunucu kontrolü tekrar uygular. İstemci kontrolünü atlamak korumayı atlamaz. Reddedilen görsel diske veya veritabanına kaydedilmez. Servis kesintisi, eksik anahtar, belirsiz yanıt ve zaman aşımı yüklemeyi engeller. Yeni bir grupta tek fotoğraf reddedilirse o grubun tamamı eklenmez; başka görseller seçilebilir.
+
+Kontrol OpenAI `omni-moderation-latest` ile optimize edilmiş, üst verileri temizlenmiş görsellere uygulanır. Cinsel içerik, şiddet, grafik şiddet ve kendine zarar verme işaretleri reddedilir. Sonuçlar yalnızca görsel özetiyle sunucu belleğinde 5 dakika tutulur (en fazla 256 kayıt); görsel veya sağlayıcı yanıtı loglanmaz. Bu özellik yeni yüklemeler içindir; eski görselleri geriye dönük taramaz. İnsan incelemesi ve şikâyet akışı korunur; otomatik tespit yüzde yüz doğruluk garantisi değildir ve özel çocuk güvenliği denetimi yerine geçmez. Mesaj fotoğrafları bu entegrasyona dahil değildir.
+
+Etkinleştirmeden önce kullanıcı bilgilendirmesini ve OpenAI'ye aktarımın işletmeci gerekliliklerini tamamla. `legal-documents.js` sağlayıcı bildirimini içerir; mevcut taslak etkinleştirme akışı korunur. API anahtarı olmadan testler sahte servis yanıtları kullanır; gerçek sınıflandırma doğruluğu bu testlerden çıkarılamaz.
+
 ### Kayıt, KVKK ve Google ile giriş
 
 Kayıt formunda “Beni hatırla” bulunmaz; yeni hesap oturum çereziyle açılır. Şifreli giriş formunda seçenek korunur. Tarayıcı otomatik doldurması için ad, e-posta, telefon ve yeni şifre alanlarında autocomplete tanımlıdır.

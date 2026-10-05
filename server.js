@@ -5,6 +5,8 @@ import compression from 'compression';
 import multer from 'multer';
 import sharp from 'sharp';
 import {preparePhoto, MAX_PHOTO_BYTES} from './image-upload.js';
+import {prepareCheckedPhoto, checkPhoto, moderationEnabled} from './photo-moderation.js';
+import {answerAppQuestion} from './app-assistant.js';
 import {legalDocuments, validateLegalAcceptance} from './legal-documents.js';
 import {verifyGoogleCredential} from './google-login.js';
 import nodemailer from 'nodemailer';
@@ -239,7 +241,7 @@ app.use(['/api/register','/api/login','/api/verify-email','/api/resend-code','/a
 app.use(['/api/password-reset/request','/api/password-reset/confirm'],authLimit);
 const writeAttempts=new Map();
 setInterval(()=>{const now=Date.now();for(const [key,entry] of attempts)if(now>entry.reset)attempts.delete(key);for(const [key,entry] of writeAttempts)if(now>entry.reset)writeAttempts.delete(key);},60000).unref();
-app.use(['/api/reports','/api/listings','/api/conversations','/api/me/avatar'],(req,res,next)=>{
+app.use(['/api/reports','/api/listings','/api/conversations','/api/me/avatar','/api/photos/check'],(req,res,next)=>{
  if(['GET','HEAD','OPTIONS'].includes(req.method))return next();
  const now=Date.now();let entry=writeAttempts.get(req.ip);if(!entry||now>entry.reset)entry={count:0,reset:now+60000};
  entry.count++;writeAttempts.set(req.ip,entry);
@@ -622,9 +624,32 @@ app.get('/api/sellers/:id/listings', (req, res) => {
   seller.avatarUrl=seller.avatar_filename?'/api/users/'+seller.id+'/avatar?v='+encodeURIComponent(seller.avatar_filename):null;delete seller.avatar_filename;res.json({ seller, listings });
 });
 const upload = multer({ storage: multer.memoryStorage(), limits: { files: 6, fileSize: MAX_PHOTO_BYTES } });
+app.get('/api/assistant/config',(_req,res)=>res.set('Cache-Control','no-store').json({aiAvailable:!!process.env.OPENAI_API_KEY?.trim(),photoModerationEnabled:moderationEnabled()}));
+const assistantAttempts=new Map();let assistantActive=0,assistantDay='',assistantDailyCount=0;
+setInterval(()=>{for(const [key,entry] of assistantAttempts)if(entry.reset<Date.now())assistantAttempts.delete(key);},60000).unref();
+app.post('/api/assistant',async(req,res)=>{
+ const message=req.body?.message;
+ if(typeof message!=='string'||!message.trim()||message.length>600)return fail(res,400,'Sorunu 1 ile 600 karakter arasında yaz.');
+ const now=Date.now(),entry=assistantAttempts.get(req.ip)||{count:0,reset:now+60000};
+ if(now>entry.reset){entry.count=0;entry.reset=now+60000;}
+ entry.count++;assistantAttempts.set(req.ip,entry);
+ if(entry.count>12){res.set('Retry-After','60');return fail(res,429,'Asistana çok hızlı mesaj gönderildi. Bir dakika sonra tekrar dene.');}
+ if(assistantActive>=4)return fail(res,503,'Asistan şu anda yoğun. Biraz sonra tekrar dene.');
+ const day=new Date().toISOString().slice(0,10);if(day!==assistantDay){assistantDay=day;assistantDailyCount=0;}
+ const useAI=assistantDailyCount<Math.max(0,Number(process.env.APP_ASSISTANT_DAILY_LIMIT||200));
+ if(useAI&&process.env.OPENAI_API_KEY)assistantDailyCount++;
+ assistantActive++;
+ try{res.set('Cache-Control','no-store').json(await answerAppQuestion(message.trim(),{env:useAI?process.env:{}}));}
+ finally{assistantActive--;}
+});
+app.post('/api/photos/check',(req,res,next)=>{if(requireUser(req,res))next();},upload.single('photo'),async(req,res)=>{
+ if(!req.file)return fail(res,400,'Bir fotoğraf seç.');
+ try{const photo=await preparePhoto(req.file);res.set('Cache-Control','no-store').json(await checkPhoto(photo));}
+ catch(error){return fail(res,error.status||400,error.message);}
+});
 app.post('/api/me/avatar', (req,res,next)=>{if(requireUser(req,res))next();}, upload.single('photo'), async(req,res)=>{
  const user=currentUser(req);if(!req.file)return fail(res,400,'Bir profil fotoğrafı seç.');
- let photo;try{photo=await preparePhoto(req.file);}catch(error){return fail(res,400,error.message);}
+ let photo;try{photo=await prepareCheckedPhoto(req.file);}catch(error){return fail(res,error.status||400,error.message);}
  const filename=randomBytes(16).toString('hex')+'.'+photo.type;
  fs.writeFileSync(path.join(avatarDir,filename),photo.buffer);
  try{db.prepare('UPDATE users SET avatar_filename=? WHERE id=?').run(filename,user.id);}catch(error){fs.rmSync(path.join(avatarDir,filename),{force:true});throw error;}
@@ -660,8 +685,8 @@ app.post('/api/listings', (req,res,next)=>{
   if (!['sale','donation'].includes(kind) || !title || !description || !category || !condition || (kind === 'sale' && !/^\d{1,9}$/.test(priceText)) || !Number.isSafeInteger(price) || price < 0) return fail(res,400,'İlan bilgilerini kontrol et.');
   if (!req.files?.length) return fail(res,400,'En az bir ürün fotoğrafı ekle.');
   let photos;
-  try { photos = []; for(const file of req.files) photos.push(await preparePhoto(file)); }
-  catch(error){ return fail(res,400,error.message); }
+  try { photos = []; for(const file of req.files) photos.push(await prepareCheckedPhoto(file)); }
+  catch(error){ return fail(res,error.status||400,error.message); }
   const result = db.prepare('INSERT INTO listings(seller_id,kind,title,description,category,condition,price,university,campus) VALUES(?,?,?,?,?,?,?,?,?)').run(user.id,kind,title,description,category,condition,price,user.university,'');
   photos.forEach((photo,index) => {
     const filename = `${randomBytes(16).toString('hex')}.${photo.type}`;
@@ -696,8 +721,8 @@ app.patch('/api/listings/:id', (req,res,next)=>{
   const files=req.files||[];
   if(kept.length+files.length<1||kept.length+files.length>6)return fail(res,400,'İlanda 1 ile 6 fotoğraf olmalı.');
   let photos;
-  try { photos = []; for(const file of files) photos.push(await preparePhoto(file)); }
-  catch(error){ return fail(res,400,error.message); }
+  try { photos = []; for(const file of files) photos.push(await prepareCheckedPhoto(file)); }
+  catch(error){ return fail(res,error.status||400,error.message); }
   const added=[];
   try{
     photos.forEach(photo=>{const filename=`${randomBytes(16).toString('hex')}.${photo.type}`;fs.writeFileSync(path.join(uploadDir,filename),photo.buffer);added.push(filename);});
