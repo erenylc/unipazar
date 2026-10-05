@@ -28,7 +28,7 @@ html[data-theme=dark] .language-options button[aria-current="true"]{background:#
 .initial-page{padding-top:28px}.initial-cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px}.initial-cards>div,.initial-panel,.initial-heading{background:#eeeaf4;border-radius:18px}.initial-cards>div{height:250px}.initial-other{display:none}.initial-heading{height:34px;width:220px;margin:16px 0 28px}.initial-panel{height:120px;margin:16px 0}html[data-initial-route=other] .initial-home{display:none}html[data-initial-route=other] .initial-other{display:block}html[data-theme=dark] .initial-cards>div,html[data-theme=dark] .initial-panel,html[data-theme=dark] .initial-heading{background:#292a3e}@media(max-width:700px){.initial-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.initial-cards>div{height:180px}}
 .account-icon .avatar img{object-fit:cover}
 
-.app-launching .launch-screen{animation:none;pointer-events:auto}
+.app-launching:not(.app-launch-complete) .launch-screen{animation:none;pointer-events:auto}
 .app-launching.app-launch-complete .launch-screen{animation:launch-screen-away .2s ease-in forwards}
 .launch-mark svg{overflow:visible;filter:drop-shadow(0 14px 24px #49407735)}
 .launch-heart{transform-box:fill-box;transform-origin:center;animation:launch-heart-return 1.15s ease-in-out infinite}
