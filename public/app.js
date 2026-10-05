@@ -846,5 +846,9 @@ document.addEventListener('focusin',prefetchListing);
 document.addEventListener('touchstart',prefetchListing,{passive:true});
 window.addEventListener('hashchange',()=>{const nextRoute=route();window.scrollTo(0,0);if(state.modal==='camera')closeModal();if(nextRoute!=='/messages')discardVoiceRecording();if(nextRoute==='/messages'&&previousRoute!=='/messages'&&!state.openConversationOnNavigation)state.selectedConversation=null;state.openConversationOnNavigation=false;previousRoute=nextRoute;render();});
 if(!location.hash)history.replaceState(null,'',location.pathname+location.search+'#/');
+// Start the public home request alongside session restoration. On signed-out
+// launches renderBrowse() reuses this cached promise instead of waiting for a
+// second network round trip after /api/me completes.
+api('/api/listings?kind=sale').catch(()=>{});
 refreshUser().then(()=>{refreshUnread().catch(()=>{});if(!state.user && accountRoutes.has(route()))history.replaceState(null,'',location.pathname+location.search+'#/');render();}).catch(error=>{pageFrame(`<main class="shell page"><section class="panel"><h2>Bağlantı kurulamadı</h2><p>İnternet bağlantını kontrol edip tekrar deneyebilirsin.</p><button class="btn btn-primary" data-action="reload-app">Tekrar dene</button></section></main>`,route());toast(error.message);});
 setInterval(()=>{if(state.user && !document.hidden) refreshUnread().catch(()=>{});},15000);
