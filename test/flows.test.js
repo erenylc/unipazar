@@ -166,6 +166,10 @@ test('öğrenci pazarı ve Dayanışma akışları', async t => {
   assert.equal((await request('/api/listings?category=Elektronik')).data.listings.length,0);
   assert.equal((await request('/api/listings?university=Boğaziçi%20Üniversitesi')).data.listings.length,0);
   assert.deepEqual((await request('/api/listings?university=%C4%B0stanbul%20Teknik%20%C3%9Cniversitesi','GET',null,outsider)).data.listings.map(l=>l.id),[id]);
+  assert.equal((await request('/api/listings?otherUniversities=1')).status,401);
+  assert.deepEqual((await request('/api/listings?otherUniversities=1','GET',null,seller)).data.listings,[]);
+  assert.deepEqual((await request('/api/listings?otherUniversities=1','GET',null,outsider)).data.listings.map(l=>l.id),[id]);
+  assert.deepEqual((await request('/api/listings?otherUniversities=1&category=Elektronik','GET',null,outsider)).data.listings,[]);
   assert.equal((await request(`/api/listings/${id}`,'GET',null,outsider)).status,200);
   assert.equal((await request(`/api/listings/${id}/conversation`,'POST',null,seller)).status,400);
   assert.equal((await request(`/api/listings/${id}/conversation`,'POST',null,outsider)).status,200);

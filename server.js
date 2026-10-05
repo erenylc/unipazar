@@ -586,6 +586,10 @@ const listingSelect = `SELECT l.*, u.name AS seller_name, u.closed_at AS seller_
 app.get('/api/listings', (req, res) => {
   const me = currentUser(req);
   const where = [`l.status='active'`, 'u.closed_at IS NULL'], args = [];
+  if(req.query.otherUniversities==='1'){
+    if(!me)return fail(res,401,'Diğer üniversitelerdeki ilanları görmek için giriş yap.');
+    where.push('l.university<>?',"l.kind='sale'");args.push(me.university);
+  }
   if (!me?.support_verified) where.push("l.kind='sale'");
   else { where.push("(l.kind='sale' OR l.university=?)"); args.push(me.university); }
   for (const [param, column] of [['university','university'],['category','category'],['kind','kind']]) {
