@@ -20,6 +20,7 @@ launcher.addEventListener('click',async()=>{
 });
 root.querySelector('.assistant-close').addEventListener('click',close);
 root.addEventListener('keydown',event=>{if(event.key==='Escape'&&!panel.hidden)close();});
+document.addEventListener('pointerdown',event=>{if(!panel.hidden&&!root.contains(event.target)){panel.hidden=true;launcher.setAttribute('aria-expanded','false');recognition?.abort();}});
 async function ask(question){
  if(busy||!question.trim())return;busy=true;sendButton.disabled=true;input.value='';addMessage(question,true);
  const waiting=addMessage('Yanıt hazırlanıyor…');waiting.setAttribute('aria-busy','true');

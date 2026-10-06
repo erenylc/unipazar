@@ -91,7 +91,7 @@ function faqContent(){ return `<section class="faq-section" aria-labelledby="faq
 function footer(){return `<footer class="footer"><div class="shell footer-help"><button type="button" class="btn btn-outline" data-action="faq">Sıkça sorulan sorular</button></div><div class="shell footer-inner"><span>© ${new Date().getFullYear()} Üni Satış · Üniversite içinde alışveriş ve dayanışma</span><span>Güvenli buluşmalar için kalabalık ve bilinen noktaları tercih et.</span></div></footer>`;}
 function listingCard(item){
  const isDonation=item.kind==='donation';
- return `<article class="card"><a class="card-image" href="#/listing/${item.id}">${item.cover?`<img src="/uploads/${encodeURIComponent(item.cover)}?width=480" alt="${escapeHtml(item.title)}" loading="lazy">`:'<div class="placeholder">Fotoğraf yok</div>'}<span class="badge ${isDonation?'free':''}">${isDonation?'Dayanışma':'İkinci el'}</span></a><button class="favorite" data-action="favorite" data-id="${item.id}" aria-label="${item.favorite?'Favorilerden çıkar':'Favorilere ekle'}">${item.favorite?'♥':'♡'}</button><div class="card-body"><a href="#/listing/${item.id}"><h3>${escapeHtml(item.title)}</h3><div class="price">${isDonation?'Ücretsiz':money(item.price)}</div><div class="meta card-campus"><span class="card-campus-logo" data-university-logo="${escapeHtml(item.university)}">${universityLogo(item.university)}</span><span>${escapeHtml(item.university)}</span></div><div class="meta card-condition">${escapeHtml(translateText(item.condition,language))}</div><span class="card-detail">İlanı incele <span aria-hidden="true">→</span></span></a></div></article>`;
+ return `<article class="card"><a class="card-image" href="#/listing/${item.id}">${item.cover?`<img src="/uploads/${encodeURIComponent(item.cover)}?width=480" alt="${escapeHtml(item.title)}" loading="lazy">`:'<div class="placeholder">Fotoğraf yok</div>'}<span class="badge ${isDonation?'free':''}">${isDonation?'Dayanışma':'İkinci el'}</span></a><button class="favorite ${item.favorite?'is-favorite':''}" aria-pressed="${!!item.favorite}" data-action="favorite" data-id="${item.id}" aria-label="${item.favorite?'Favorilerden çıkar':'Favorilere ekle'}">${item.favorite?'♥':'♡'}</button><div class="card-body"><a href="#/listing/${item.id}"><h3>${escapeHtml(item.title)}</h3><div class="price">${isDonation?'Ücretsiz':money(item.price)}</div><div class="meta card-campus"><span class="card-campus-logo" data-university-logo="${escapeHtml(item.university)}">${universityLogo(item.university)}</span><span>${escapeHtml(item.university)}</span></div><div class="meta card-condition">${escapeHtml(translateText(item.condition,language))}</div><span class="card-detail">İlanı incele <span aria-hidden="true">→</span></span></a></div></article>`;
 }
 function contactBadges(email,phone){return `<div class="seller-verification" aria-label="Satıcının iletişim doğrulaması">${email?'<span>✓ E-posta doğrulandı</span>':''}${phone?'<span>✓ Telefon doğrulandı</span>':'<small>Telefon doğrulanmadı</small>'}</div>`;}
 function empty(title,body){ return `<div class="empty"><div class="empty-icon">☘</div><h3>${escapeHtml(title)}</h3><p>${escapeHtml(body)}</p></div>`; }
@@ -101,11 +101,12 @@ function pageFrame(content,active){
   (_match,title,subtitle)=>`<section class="page-intro page-intro-${art}"><div><span class="page-intro-kicker">ÜNİ SATIŞ</span><h2>${title}</h2><p>${subtitle}</p></div><img src="/${art}-illustration.svg" alt="" aria-hidden="true"></section>`);
  $('#app').innerHTML=navbar(active)+content+footer();
  applyLocale($('#app'),language);
+ document.dispatchEvent(new Event('unisatis-render'));
 }
 async function loadListings(){
   const params=new URLSearchParams();
   for(const [key,value] of Object.entries(state.filters)) if(value && !(key==='university' && value==='*')) params.set(key,value);
-  state.listings=(await api('/api/listings?'+params)).listings;
+  const result=await api('/api/listings?'+params);state.listings=result.listings;state.feedPage=result.page;
 }
 async function refreshSearchResults(query){
  const params=new URLSearchParams();
@@ -115,14 +116,15 @@ async function refreshSearchResults(query){
  grid.setAttribute('aria-busy','true');
  const isCurrent=()=>grid===$('.grid') && filters===JSON.stringify(state.filters) && $('#searchInput')?.value===query && ['/','/donation'].includes(route());
  try{
-  const {listings}=await api('/api/listings?'+params);
+  const {listings,page}=await api('/api/listings?'+params);
   if(!isCurrent())return;
-  state.listings=listings;
+  state.listings=listings;state.feedPage=page;
   $('.grid').innerHTML=listings.length?listings.map(listingCard).join(''):empty(query?'Sonuç bulunamadı':'Henüz ilan yok',query?'Başka bir ürün adı deneyebilirsin.':'İlk ilanı sen verebilirsin.');
   $('.result-count').textContent=`${listings.length} ilan`;
   applyLocale($('.grid'),language);
   $('.result-count').textContent=translateText(`${listings.length} ilan`,language);
   $('.grid').setAttribute('aria-busy','false');
+  document.dispatchEvent(new Event('unisatis-feed-reset'));
  }catch(error){if(isCurrent()){toast(error.message);grid.setAttribute('aria-busy','false');}}
 }
 async function renderBrowse(donations=false){
@@ -165,6 +167,7 @@ function updateFavoriteButtons(id,favorite){
   const detail=!!button.closest('.detail-side');
   button.textContent=detail?translateText(favorite?'♥ Favorilerden çıkar':'♡ Favorilere ekle',language):(favorite?'♥':'♡');
   button.setAttribute('aria-label',translateText(favorite?'Favorilerden çıkar':'Favorilere ekle',language));
+  button.classList.toggle('is-favorite',favorite);button.setAttribute('aria-pressed',String(favorite));
  });
  const item=state.listings.find(listing=>String(listing.id)===String(id));
  if(item)item.favorite=favorite;
@@ -262,6 +265,10 @@ document.addEventListener('toggle',event=>{
 function closeOutsideMenus(event){for(const selector of ['.message-menu','.category-menu','.language-menu'])document.querySelectorAll(selector+'[open]').forEach(menu=>{if(!menu.contains(event.target))menu.open=false;});}
 document.addEventListener('pointerdown',closeOutsideMenus);
 document.addEventListener('click',closeOutsideMenus);
+let backdropPress=false;
+document.addEventListener('pointerdown',event=>{backdropPress=event.target.matches?.('.modal-backdrop')||false;const profile=$('.profile-menu');if(profile&&!profile.hidden&&!event.target.closest('.profile-menu,.account-icon')){profile.hidden=true;$('.account-icon')?.setAttribute('aria-expanded','false');}const owner=$('.owner-menu');if(owner&&!owner.hidden&&!event.target.closest('.detail-owner-actions'))owner.hidden=true;});
+document.addEventListener('pointerup',event=>{if(backdropPress&&event.target.matches?.('.modal-backdrop'))closeModal();backdropPress=false;});
+document.addEventListener('keydown',event=>{if(event.key!=='Escape')return;if(state.modal)closeModal();document.querySelectorAll('details[open]').forEach(el=>el.open=false);const profile=$('.profile-menu');if(profile)profile.hidden=true;const owner=$('.owner-menu');if(owner)owner.hidden=true;});
 document.addEventListener('pointerover',event=>{if(!state.user&&event.target.closest('.account-icon,[data-action="auth-tab"]')){warmGoogleSignIn().catch(()=>{});loadUniversities().catch(()=>{});}});
 document.addEventListener('pointerup',cancelPress);document.addEventListener('pointercancel',cancelPress);document.addEventListener('pointermove',event=>{if(pressOrigin&&Math.hypot(event.clientX-pressOrigin[0],event.clientY-pressOrigin[1])>10)cancelPress();});
 document.addEventListener('input',event=>{if(event.target.matches('.chat-compose [name="body"]')&&chatRenderedId)chatDrafts.set(chatRenderedId,event.target.value);});
@@ -624,7 +631,8 @@ function showDetailPhoto(index){
  detailPhotoIndex=(index+detailPhotos.length)%detailPhotos.length;
  const photo=detailPhotos[detailPhotoIndex],main=$('#detailMainPhoto');if(!main)return;
  const changed=main.getAttribute('src')!==photo.src;main.src=photo.src;main.alt=photo.alt;
- if(changed&&!matchMedia('(prefers-reduced-motion: reduce)').matches)main.animate([{opacity:.45,transform:'translateX(14px)'},{opacity:1,transform:'translateX(0)'}],{duration:170,easing:'ease-out'});
+ const track=$('.carousel-track');if(track){main.src=detailPhotos[0].src;track.scrollTo({left:detailPhotoIndex*track.clientWidth,behavior:track.dataset.ready&&!matchMedia('(prefers-reduced-motion: reduce)').matches?'smooth':'auto'});track.dataset.ready='1';}
+ else if(changed&&!matchMedia('(prefers-reduced-motion: reduce)').matches)main.animate([{opacity:.45},{opacity:1}],{duration:170,easing:'ease-out'});
  $('#detailPhotoCounter').textContent=`${detailPhotoIndex+1} / ${detailPhotos.length}`;
  document.querySelectorAll('[data-action="carousel-show"]').forEach((button,i)=>button.classList.toggle('active',i===detailPhotoIndex));
 }
@@ -633,15 +641,16 @@ function decorateDetail(){
  detailPhotos=[...gallery.querySelectorAll('img')].map(image=>({src:image.getAttribute('src'),alt:image.alt}));detailPhotoIndex=0;
  if(detailPhotos.length){
   gallery.classList.add('detail-carousel');
-  gallery.innerHTML=`<div class="carousel-main"><img id="detailMainPhoto" alt=""><button type="button" class="carousel-arrow prev" data-action="carousel-prev" aria-label="Önceki fotoğraf">‹</button><button type="button" class="carousel-arrow next" data-action="carousel-next" aria-label="Sonraki fotoğraf">›</button><span class="carousel-counter" id="detailPhotoCounter"></span></div>${detailPhotos.length>1?`<div class="carousel-thumbs">${detailPhotos.map((photo,index)=>`<button type="button" data-action="carousel-show" data-index="${index}" aria-label="${index+1}. fotoğraf"><img src="${escapeHtml(photo.src.replace(/width=1600$/,'width=160'))}" alt=""></button>`).join('')}</div>`:''}`;
+  gallery.innerHTML=`<div class="carousel-main"><div class="carousel-track">${detailPhotos.map((photo,index)=>`<img ${index===0?'id="detailMainPhoto"':''} src="${escapeHtml(photo.src)}" alt="${escapeHtml(photo.alt)}" draggable="false" loading="${index===0?'eager':'lazy'}">`).join('')}</div><button type="button" class="carousel-arrow prev" data-action="carousel-prev" aria-label="Önceki fotoğraf">‹</button><button type="button" class="carousel-arrow next" data-action="carousel-next" aria-label="Sonraki fotoğraf">›</button><span class="carousel-counter" id="detailPhotoCounter"></span></div>${detailPhotos.length>1?`<div class="carousel-thumbs">${detailPhotos.map((photo,index)=>`<button type="button" data-action="carousel-show" data-index="${index}" aria-label="${index+1}. fotoğraf"><img src="${escapeHtml(photo.src.replace(/width=1600$/,'width=160'))}" alt=""></button>`).join('')}</div>`:''}`;
   showDetailPhoto(0);
   if(detailPhotos.length===1)gallery.querySelectorAll('.carousel-arrow').forEach(button=>button.hidden=true);
   const main=gallery.querySelector('.carousel-main'),image=main.querySelector('img');image.draggable=false;main.tabIndex=0;main.setAttribute('role','button');main.setAttribute('aria-label','Fotoğrafı büyüt; yön tuşlarıyla fotoğraf değiştir');
-  let gesture=null,suppressClick=false;
-  main.addEventListener('pointerdown',event=>{if(event.target.closest('button')||event.button!==0)return;gesture={x:event.clientX,y:event.clientY,id:event.pointerId};suppressClick=false;main.setPointerCapture(event.pointerId);});
-  main.addEventListener('pointermove',event=>{if(!gesture||event.pointerId!==gesture.id)return;const dx=event.clientX-gesture.x,dy=event.clientY-gesture.y;if(Math.abs(dx)>12&&Math.abs(dx)>Math.abs(dy)){suppressClick=true;main.classList.add('dragging');image.style.transform=`translateX(${dx*.35}px)`;}});
-  const finishGesture=event=>{if(!gesture)return;const dx=event.clientX-gesture.x,dy=event.clientY-gesture.y;gesture=null;main.classList.remove('dragging');image.style.transform='';if(event.type!=='pointercancel'&&Math.abs(dx)>45&&Math.abs(dx)>Math.abs(dy)&&detailPhotos.length>1)showDetailPhoto(detailPhotoIndex+(dx<0?1:-1));};
-  main.addEventListener('pointerup',finishGesture);main.addEventListener('pointercancel',finishGesture);
+  const track=main.querySelector('.carousel-track');let gesture=null,suppressClick=false,scrollFrame=0;
+  track.addEventListener('scroll',()=>{if(scrollFrame)return;scrollFrame=requestAnimationFrame(()=>{scrollFrame=0;detailPhotoIndex=Math.max(0,Math.min(detailPhotos.length-1,Math.round(track.scrollLeft/track.clientWidth)));$('#detailPhotoCounter').textContent=`${detailPhotoIndex+1} / ${detailPhotos.length}`;document.querySelectorAll('[data-action="carousel-show"]').forEach((button,i)=>button.classList.toggle('active',i===detailPhotoIndex));});},{passive:true});
+  track.addEventListener('pointerdown',event=>{if(event.button!==0)return;suppressClick=false;gesture={x:event.clientX,y:event.clientY,left:track.scrollLeft,id:event.pointerId,mouse:event.pointerType==='mouse'};if(gesture.mouse){track.setPointerCapture(event.pointerId);track.style.scrollSnapType='none';track.style.scrollBehavior='auto';}});
+  track.addEventListener('pointermove',event=>{if(!gesture)return;const dx=event.clientX-gesture.x;if(Math.abs(dx)>8){suppressClick=true;if(gesture.mouse){track.scrollLeft=gesture.left-dx;main.classList.add('dragging');}}});
+  const finishGesture=event=>{if(!gesture)return;const mouse=gesture.mouse;gesture=null;main.classList.remove('dragging');track.style.scrollSnapType='';track.style.scrollBehavior='';if(mouse)showDetailPhoto(Math.round(track.scrollLeft/track.clientWidth));};
+  track.addEventListener('pointerup',finishGesture);track.addEventListener('pointercancel',finishGesture);
   main.addEventListener('click',event=>{if(event.target.closest('button')||suppressClick){suppressClick=false;return;}showPhotoViewer(detailPhotos[detailPhotoIndex].src,detailPhotos[detailPhotoIndex].alt,false,detailPhotos,detailPhotoIndex);});
   main.addEventListener('keydown',event=>{if(event.target!==main)return;if(['ArrowLeft','ArrowRight','Enter',' '].includes(event.key))event.preventDefault();if(event.key==='ArrowLeft')showDetailPhoto(detailPhotoIndex-1);if(event.key==='ArrowRight')showDetailPhoto(detailPhotoIndex+1);if(event.key==='Enter'||event.key===' ')showPhotoViewer(detailPhotos[detailPhotoIndex].src,detailPhotos[detailPhotoIndex].alt,false,detailPhotos,detailPhotoIndex);});
   detailPhotos.slice(1).forEach(photo=>{const preload=new Image();preload.src=photo.src;});
@@ -684,9 +693,15 @@ function connectMessageStream(){
  messageStream?.close();messageStream=null;chatMessages.clear();chatDrafts.clear();chatConversations=[];chatRenderedId=null;streamUserId=state.user?.id||null;
  if(!streamUserId)return;
  messageStream=new EventSource('/api/message-events');
+ messageStream.onopen=()=>{
+  responseCache.delete('/api/conversations');chatMessages.clear();
+  refreshUnread().catch(()=>{});
+  if(route()==='/messages'&&!document.hidden&&voiceRecorder?.state!=='recording')renderMessages().catch(error=>toast(error.message));
+ };
  messageStream.onmessage=event=>{
   let payload;try{payload=JSON.parse(event.data)}catch{return;}
   responseCache.delete('/api/conversations');chatMessages.delete(payload.conversationId);
+  if(payload.resync)chatMessages.clear();
   if(payload.senderId===state.user?.id){refreshUnread().catch(()=>{});return;}
   clearTimeout(liveRenderTimer);
   liveRenderTimer=setTimeout(()=>{
@@ -899,4 +914,6 @@ if(!location.hash)history.replaceState(null,'',location.pathname+location.search
 // second network round trip after /api/me completes.
 api('/api/listings?kind=sale').catch(()=>{});
 refreshUser().then(async()=>{refreshUnread().catch(()=>{});if(!state.user && accountRoutes.has(route()))history.replaceState(null,'',location.pathname+location.search+'#/');await render();}).catch(error=>{pageFrame(`<main class="shell page"><section class="panel"><h2>Bağlantı kurulamadı</h2><p>İnternet bağlantını kontrol edip tekrar deneyebilirsin.</p><button class="btn btn-primary" data-action="reload-app">Tekrar dene</button></section></main>`,route());toast(error.message);}).finally(()=>document.dispatchEvent(new Event('unisatis-ready')));
-setInterval(()=>{if(state.user && !document.hidden) refreshUnread().catch(()=>{});},15000);
+// SSE delivers updates immediately; periodic reads only recover lost connections.
+setInterval(()=>{if(state.user&&!document.hidden&&messageStream?.readyState!==EventSource.OPEN)refreshUnread().catch(()=>{});},30000);
+export {api,state,render,go,showSimpleModal,closeModal,toast,escapeHtml,listingCard,refreshUser};

@@ -8,10 +8,15 @@ import {preparePhoto, MAX_PHOTO_BYTES} from './image-upload.js';
 import {prepareCheckedPhoto, checkPhoto, moderationEnabled} from './photo-moderation.js';
 import {answerAppQuestion} from './app-assistant.js';
 import {normalizePhone,smsConfigured,sendPhoneCode} from './phone-verification.js';
+import {registerProductFeatures} from './product-features.js';
+import {registerOperations} from './operations.js';
 import {legalDocuments, validateLegalAcceptance} from './legal-documents.js';
 import {verifyGoogleCredential} from './google-login.js';
 import nodemailer from 'nodemailer';
 import { DatabaseSync } from 'node:sqlite';
+import {cachePreparedStatements,addPerformanceIndexes} from './database-performance.js';
+import {createMessageHub} from './message-hub.js';
+import {createListingSearch} from './listing-search.js';
 import { randomBytes, randomInt, scrypt as scryptCallback, timingSafeEqual, createHash } from 'node:crypto';
 import { promisify } from 'node:util';
 import fs from 'node:fs';
@@ -171,17 +176,15 @@ if (!db.prepare('PRAGMA table_info(messages)').all().some(column => column.name 
   db.exec('ALTER TABLE messages ADD COLUMN voice_filename TEXT');
 }
 const expireListings = () => {
+  if(!db.prepare("SELECT 1 FROM listings WHERE status IN ('active','reserved') AND created_at <= datetime('now','-180 days') LIMIT 1").get())return;
   db.prepare("UPDATE listings SET status='expired' WHERE status IN ('active','reserved') AND created_at <= datetime('now','-180 days')").run();
 };
 expireListings();
 setInterval(expireListings, 60 * 60 * 1000).unref();
 
-const messageStreams = new Map();
-const notifyConversation = (conversation, senderId) => {
-  for (const userId of [conversation.buyer_id, conversation.seller_id]) {
-    for (const response of messageStreams.get(userId) || []) response.write(`data: ${JSON.stringify({ conversationId:conversation.id, senderId })}\n\n`);
-  }
-};
+const messageHub=createMessageHub();
+const messageStreams=messageHub.streams;
+const notifyConversation=(conversation,senderId)=>messageHub.notify(conversation,senderId);
 
 // Existing message IDs and foreign-key targets are preserved during this migration.
 if (db.prepare('PRAGMA table_info(conversations)').all().find(c=>c.name==='listing_id').notnull) {
@@ -194,6 +197,9 @@ if (db.prepare('PRAGMA table_info(conversations)').all().find(c=>c.name==='listi
   finally {db.exec('PRAGMA foreign_keys=ON');}
 }
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS direct_admin_conversation ON conversations(buyer_id,seller_id) WHERE listing_id IS NULL');
+addPerformanceIndexes(db);
+const listingSearch=createListingSearch(db);
+cachePreparedStatements(db);
 const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
@@ -251,8 +257,9 @@ const writeAttempts=new Map();
 setInterval(()=>{const now=Date.now();for(const [key,entry] of attempts)if(now>entry.reset)attempts.delete(key);for(const [key,entry] of writeAttempts)if(now>entry.reset)writeAttempts.delete(key);},60000).unref();
 app.use(['/api/reports','/api/listings','/api/conversations','/api/me/avatar','/api/photos/check'],(req,res,next)=>{
  if(['GET','HEAD','OPTIONS'].includes(req.method))return next();
- const now=Date.now();let entry=writeAttempts.get(req.ip);if(!entry||now>entry.reset)entry={count:0,reset:now+60000};
- entry.count++;writeAttempts.set(req.ip,entry);
+ const user=currentUser(req),key=user?'user:'+user.id:'ip:'+req.ip;
+ const now=Date.now();let entry=writeAttempts.get(key);if(!entry||now>entry.reset)entry={count:0,reset:now+60000};
+ entry.count++;writeAttempts.set(key,entry);
  if(entry.count>120){res.set('Retry-After',String(Math.ceil((entry.reset-now)/1000)));return fail(res,429,'Çok fazla işlem yapıldı. Biraz bekleyip tekrar dene.');}
  next();
 });
@@ -280,7 +287,7 @@ const verifyPassword = async (password, stored) => {
 };
 const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res)).catch(next);
 const fail = (res, code, error) => res.status(code).json({ error });
-const publicUser = user => user && ({ id: user.id, name: user.name, email: user.email, phone:user.phone || '', phoneVerified:!!user.phone_verified, avatarUrl:user.avatar_filename?'/api/users/'+user.id+'/avatar?v='+encodeURIComponent(user.avatar_filename):null, university: user.university, emailVerified: !!user.email_verified, studentStatus: user.student_status, needsSupport: !!user.support_verified, supportStatus:db.prepare('SELECT status FROM support_applications WHERE user_id=?').get(user.id)?.status || 'none', role: user.role });
+const publicUser = user => user && ({ id: user.id, name: user.name, email: user.email, phone:user.phone || '', phoneVerified:!!user.phone_verified,universityEmail:user.school_email||'',universityEmailVerified:!!user.school_verified, avatarUrl:user.avatar_filename?'/api/users/'+user.id+'/avatar?v='+encodeURIComponent(user.avatar_filename):null, university: user.university, emailVerified: !!user.email_verified, studentStatus: user.student_status, needsSupport: !!user.support_verified, supportStatus:db.prepare('SELECT status FROM support_applications WHERE user_id=?').get(user.id)?.status || 'none', role: user.role });
 const currentUser = req => {
   const token = /(?:^|; )up_session=([^;]+)/.exec(req.headers.cookie || '')?.[1];
   if (!token) return null;
@@ -328,6 +335,9 @@ function validEmailCode(user,code){
  if(!/^\d{6}$/.test(code)||record.code_hash!==hash(code)){db.prepare('UPDATE verification_codes SET attempts=attempts+1 WHERE user_id=?').run(user.id);return false;}
  return true;
 }
+app.use('/api/me/university-email',authLimit);
+registerProductFeatures({app,db,requireUser,requireAdmin,fail,hash,randomCode,universities,uploadDir,searchExpression:value=>listingSearch.expression(searchWords(value),closeWord),emailAvailable:emailVerificationAvailable,testEmailCodes,sendMail:async(email,subject,text)=>{if(testEmailCodes)return;if(brevoConfigured())return sendBrevoTextEmail(email,subject,text);if(mailer)return mailer.sendMail({from:process.env.SMTP_FROM,to:email,subject,text});throw new Error('Email unavailable');}});
+registerOperations({app,db,requireAdmin,fail,dataDir,uploadDir});
 app.get('/api/me', (req, res) => {res.set('Cache-Control','no-store');res.json({ user: publicUser(currentUser(req)),emailVerificationAvailable:emailVerificationAvailable(),phoneVerificationAvailable:smsConfigured()||testPhoneCodes,contactVerificationRequired:phoneVerificationRequired(),emailVerificationRequired:!dev||phoneVerificationRequired(),googleClientId,legalVersion:legal?.version || null });});
 app.get('/legal/:document', (req,res)=>{
   const document=legal?.[req.params.document];
@@ -617,20 +627,26 @@ const closeWord = (query, word) => {
   }
   return rows[query.length][word.length]<=limit;
 };
+const searchContentCache=new Map();
 const listingSearchScore = (row, normalizedQuery, queryWords) => {
-  const title=normalizeSearch(row.title), description=normalizeSearch(row.description);
+  let content=searchContentCache.get(row.id);
+  if(!content||content.originalTitle!==row.title||content.originalDescription!==row.description){
+    content={originalTitle:row.title,originalDescription:row.description,title:normalizeSearch(row.title),description:normalizeSearch(row.description),titleWords:searchWords(row.title),descriptionWords:searchWords(row.description)};
+    if(searchContentCache.size>=1000)searchContentCache.delete(searchContentCache.keys().next().value);searchContentCache.set(row.id,content);
+  }
+  const {title,description,titleWords,descriptionWords}=content;
   if(title.includes(normalizedQuery))return 0;
   if(description.includes(normalizedQuery))return 1;
-  const titleWords=searchWords(row.title);
   if(queryWords.every(query=>titleWords.some(word=>closeWord(query,word))))return 2;
-  const allWords=titleWords.concat(searchWords(row.description));
+  const allWords=titleWords.concat(descriptionWords);
   if(queryWords.every(query=>allWords.some(word=>closeWord(query,word))))return 3;
   return null;
 };
-const listingSelect = `SELECT l.*, u.name AS seller_name, u.closed_at AS seller_closed,u.email_verified AS seller_email_verified,u.phone_verified AS seller_phone_verified,
+const listingSelect = `SELECT l.*, u.name AS seller_name, u.closed_at AS seller_closed,u.school_verified AS seller_school_verified,u.email_verified AS seller_email_verified,u.phone_verified AS seller_phone_verified,
  (SELECT filename FROM listing_images i WHERE i.listing_id=l.id ORDER BY position LIMIT 1) AS cover,
  (SELECT COUNT(*) FROM listing_images i WHERE i.listing_id=l.id) AS image_count
  FROM listings l JOIN users u ON u.id=l.seller_id`;
+const listingSearchSelect=listingSelect.replace('FROM listings l JOIN users u ON u.id=l.seller_id','FROM listing_search CROSS JOIN listings l ON l.id=listing_search.rowid JOIN users u ON u.id=l.seller_id');
 app.get('/api/listings', (req, res) => {
   const me = currentUser(req);
   const where = [`l.status='active'`, 'u.closed_at IS NULL'], args = [];
@@ -643,13 +659,28 @@ app.get('/api/listings', (req, res) => {
   for (const [param, column] of [['university','university'],['category','category'],['kind','kind']]) {
     if (req.query[param]) { where.push(`l.${column}=?`); args.push(clean(req.query[param], 100)); }
   }
-  if (req.query.maxPrice) { where.push('l.price<=?'); args.push(Number(req.query.maxPrice) * 100); }
+  if(req.query.condition){where.push('l.condition=?');args.push(clean(req.query.condition,40));}
+  for(const [key,operator] of [['minPrice','>='],['maxPrice','<=']])if(req.query[key]!==undefined&&req.query[key]!==''){const amount=Number(req.query[key]);if(!Number.isFinite(amount)||amount<0||amount>10000000)return fail(res,400,'Geçersiz fiyat aralığı.');where.push(`l.price${operator}?`);args.push(Math.round(amount*100));}
+  if(req.query.minPrice!==undefined&&req.query.maxPrice!==undefined&&Number(req.query.minPrice)>Number(req.query.maxPrice))return fail(res,400,'En düşük fiyat en yüksek fiyatı geçemez.');
+  const order=({'price-asc':'l.price ASC,l.id DESC','price-desc':'l.price DESC,l.id DESC',oldest:'l.id ASC'})[req.query.sort]||'l.id DESC';
   const query = normalizeSearch(clean(req.query.q, 100)).trim();
-  const candidates = db.prepare(`${listingSelect} WHERE ${where.join(' AND ')} ORDER BY l.created_at DESC${query ? '' : ' LIMIT 100'}`).all(...args);
   const terms=searchWords(query);
-  const rows = (terms.length ? candidates.map(row=>({row,score:listingSearchScore(row,query,terms)})).filter(item=>item.score!==null).sort((a,b)=>a.score-b.score).map(item=>item.row) : candidates).slice(0,100);
+  const pageSize=terms.length?100:Number(req.query.limit??24);
+  if(!Number.isInteger(pageSize)||pageSize<1||pageSize>100)return fail(res,400,'Geçersiz sayfa boyutu.');
+  if(req.query.after&&!terms.length){
+    let cursor;try{cursor=JSON.parse(Buffer.from(String(req.query.after).slice(0,300),'base64url').toString());}catch{return fail(res,400,'Geçersiz ilan sayfası.');}
+    if(!Number.isSafeInteger(cursor.id)||cursor.id<1||!Number.isSafeInteger(cursor.price)||cursor.price<0||cursor.sort!==(req.query.sort||'newest'))return fail(res,400,'Geçersiz ilan sayfası.');
+    if(req.query.sort==='price-asc'||req.query.sort==='price-desc'){const operator=req.query.sort==='price-asc'?'>':'<';where.push(`(l.price${operator}? OR (l.price=? AND l.id<?))`);args.push(cursor.price,cursor.price,cursor.id);}
+    else{where.push(req.query.sort==='oldest'?'l.id>?':'l.id<?');args.push(cursor.id);}
+  }
+  if(terms.length){where.push('listing_search MATCH ?');args.push(listingSearch.expression(terms,closeWord));}
+  const searchOrder=terms.length&&order.startsWith('l.id ')?order.replace('l.id','listing_search.rowid'):order;
+  const candidates = db.prepare(`${terms.length?listingSearchSelect:listingSelect} WHERE ${where.join(' AND ')} ORDER BY ${searchOrder} LIMIT ${terms.length?300:pageSize+1}`).all(...args);
+  const rows = (terms.length ? candidates.map(row=>({row,score:listingSearchScore(row,query,terms)})).filter(item=>item.score!==null).sort((a,b)=>!req.query.sort||req.query.sort==='newest'?a.score-b.score:0).map(item=>item.row) : candidates).slice(0,pageSize);
+  const hasMore=!terms.length&&candidates.length>pageSize,last=rows.at(-1);
+  const nextCursor=hasMore?Buffer.from(JSON.stringify({id:last.id,price:last.price,sort:req.query.sort||'newest'})).toString('base64url'):null;
   const favoriteIds = me ? new Set(db.prepare('SELECT listing_id FROM favorites WHERE user_id=?').all(me.id).map(row=>row.listing_id)) : new Set();
-  res.json({ listings: rows.map(row=>({ ...row, favorite:favoriteIds.has(row.id) })) });
+  res.json({ listings: rows.map(row=>({ ...row, favorite:favoriteIds.has(row.id) })),page:{hasMore,nextCursor} });
 });
 app.get('/api/listings/:id', (req, res) => {
   const row = db.prepare(`${listingSelect} WHERE l.id=?`).get(req.params.id);
@@ -667,7 +698,7 @@ app.get('/api/sellers/:id/listings', (req, res) => {
   const seller = db.prepare('SELECT id,name,university,avatar_filename,email_verified,phone_verified FROM users WHERE id=? AND closed_at IS NULL').get(req.params.id);
   if (!seller) return fail(res,404,'Satıcı bulunamadı.');
   const listings = db.prepare(`${listingSelect} WHERE l.seller_id=? AND l.kind='sale' AND l.status='active' ORDER BY l.created_at DESC`).all(seller.id);
-  seller.avatarUrl=seller.avatar_filename?'/api/users/'+seller.id+'/avatar?v='+encodeURIComponent(seller.avatar_filename):null;delete seller.avatar_filename;res.json({ seller, listings });
+  seller.avatarUrl=seller.avatar_filename?'/api/users/'+seller.id+'/avatar?v='+encodeURIComponent(seller.avatar_filename):null;delete seller.avatar_filename;const me=currentUser(req),favorites=me?new Set(db.prepare('SELECT listing_id FROM favorites WHERE user_id=?').all(me.id).map(r=>r.listing_id)):new Set();res.json({seller,listings:listings.map(l=>({...l,favorite:favorites.has(l.id)}))});
 });
 const upload = multer({ storage: multer.memoryStorage(), limits: { files: 6, fileSize: MAX_PHOTO_BYTES } });
 app.get('/api/assistant/config',(_req,res)=>res.set('Cache-Control','no-store').json({aiAvailable:!!process.env.OPENAI_API_KEY?.trim(),photoModerationEnabled:moderationEnabled()}));
@@ -843,15 +874,13 @@ app.get('/api/conversations', (req, res) => {
 });
 app.get('/api/message-events', (req,res) => {
   const user=requireUser(req,res); if(!user)return;
+  if(messageHub.size>=20000||(messageStreams.get(user.id)?.size||0)>=4){res.set('Retry-After','10');return fail(res,503,'Mesaj bağlantısı şu anda yoğun. Biraz sonra tekrar dene.');}
   res.setHeader('Content-Type','text/event-stream');
   res.setHeader('Cache-Control','no-cache, no-transform');
   res.setHeader('Connection','keep-alive');
+  res.setHeader('X-Accel-Buffering','no');
   res.flushHeaders();
-  res.write(': connected\n\n');
-  if(!messageStreams.has(user.id))messageStreams.set(user.id,new Set());
-  messageStreams.get(user.id).add(res);
-  const heartbeat=setInterval(()=>res.write(': ping\n\n'),25000);
-  req.on('close',()=>{clearInterval(heartbeat);messageStreams.get(user.id)?.delete(res);if(!messageStreams.get(user.id)?.size)messageStreams.delete(user.id);});
+  messageHub.add(user.id,req,res);
 });
 app.get('/api/unread-count', (req, res) => {
   const user = requireUser(req,res); if (!user) return;

@@ -1,0 +1,1 @@
+.feed-pagination{display:flex;align-items:center;justify-content:center;gap:16px;margin:24px 0;flex-wrap:wrap}.feed-pagination span{font-size:14px;color:inherit}.feed-pagination button:disabled{opacity:.45;cursor:default}.feed-pagination button{min-height:44px}@media(max-width:600px){.feed-pagination{gap:8px}.feed-pagination button{font-size:12px;padding:10px 12px}}

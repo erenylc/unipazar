@@ -2,6 +2,20 @@
 
 Üniversite öğrencileri için mobil öncelikli ikinci el pazar ve Dayanışma uygulamasının ilk çalışan sürümü.
 
+## Üniversite e-postası
+
+Üniversite e-postası `Hesabım` üzerinden ayrıca doğrulanabilir: `.edu.tr` posta kutusuna tek kullanımlık kod gönderilir. Bu rozet yalnızca bu posta kutusuna erişimi kanıtlar; seçilen üniversiteye veya öğrenciliğe ilişkin belge onayı değildir.
+
+## Güvenlik, aramalar, değerlendirme ve operasyon
+
+- `Yönetim` ekranında seri ilan, aynı fotoğraf, tekrarlanan şikâyet ve ilan açıklamasındaki kapora ifadesi için gerekçeli risk kuyruğu vardır. İşaretler otomatik suçlama/hesap kapatma değildir; yönetici inceleme sonucu kaydeder.
+- `Şikâyetlerim` ekranı kullanıcıya sadece kendi kayıtlarını, alındı/inceleniyor/sonuçlandı durumunu ve yönetici açıklamasını gösterir. Sonuca bir kez gerekçeli itiraz gönderilebilir.
+- İki taraf sohbetten teslimatı ayrı ayrı onayladığında satış tamamlanır. Telefon/e-postası doğrulanmış alıcı bu işlem için bir değerlendirme yapabilir. Profilde hesap tarihi, iki tarafça onaylanan satış sayısı ve gerçek işlem bağlantılı yorumlar gösterilir. Bu karşılıklı onay fiziksel teslimatı bağımsız biçimde kanıtlamaz.
+- Fiyat aralığı, ürün durumu, sıralama ve kaydedilen aramalar vardır. Yeni ilan bildirimleri kullanıcının seçimiyle uygulama içinde gösterilir; arka planda push/e-posta bildirimi değildir.
+- Hız ölçümleri sayfa yükleme, fotoğraf ve API sürelerini mobil/masaüstü sınıfıyla kaydeder; soru, mesaj, e-posta, telefon veya kullanıcı kimliği ölçümlere yazılmaz. Yönetici ekranında hata ve süre özetleri görünür. Ölçümler 14 gün ve 10.000 kayıtla sınırlıdır.
+- Üretimde 6 saatte bir SQLite ve ilgili ilan/profil/mesaj/ses dosyalarının yedeği alınır; son 7 tamamlanmış yedek tutulur. `BACKUP_ENABLED=0` kapatır. Varsayılan `DATA_DIR/backups` aynı disktedir; tüm disk kaybına karşı ayrı depolamaya kopyalama gerekir. Yedekler web üzerinden sunulmaz.
+- Yedeği kontrol et: `node scripts/restore-backup.mjs YEDEK_DIZINI`. Yeni bir dizine geri yükle: `node scripts/restore-backup.mjs YEDEK_DIZINI YENI_HEDEF_DIZINI`. Mevcut dizinlerin üzerine yazılmaz. Başlamadan önce uygulamayı durdur; ardından dönen `dataDir` ve `uploadDir` yollarını sunucuya ayarla. SHA-256 ve SQLite bütünlük kontrolleri geçmeden geri yükleme başlamaz.
+
 ## Telefon ve e-posta doğrulaması
 
 Netgsm hesabında OTP SMS paketi, onaylı gönderici başlığı ve API erişimi açıldıktan sonra Railway'in gizli ortam değişkenlerine `NETGSM_USERCODE`, `NETGSM_PASSWORD` ve `NETGSM_HEADER` eklenir. Anahtarları Git'e veya sohbete yazma. Bu üç ayar mevcut olduğunda telefon doğrulaması ilan verme, sohbet başlatma, mesaj gönderme, teklif ve ürün talebi için zorunlu olur. `REQUIRE_CONTACT_VERIFICATION=1` aynı kontrolü hizmet etkin olmasa da zorunlu yapar; servis hazırlanmadan açılırsa kullanıcılar işlem yapamaz. Üretimde bu işlemler için e-posta doğrulaması da zorunludur.

@@ -37,4 +37,4 @@ Telefon veya e-posta doğrulanmış olması kimlik, öğrencilik veya güvenilir
 
 ## Bu çalışmanın durumu
 
-Büyük fotoğraf penceresinde oklar, klavye ve sürükleme geçişi; botta temel selamlaşma; e-posta kodunda deneme sınırı ve Brevo değişiklik akışı; SMS doğrulama altyapısı, tek numara kontrolü ve satıcı doğrulama durumları uygulandı. Gerçek SMS için Netgsm aboneliği/OTP paketi/API ayarları, doğal yapay zekâ sohbeti için sunucu OpenAI anahtarı gerekiyor. Bu belgede önerilen diğer özellikler henüz uygulanmış sayılmaz.
+Üniversite e-postası doğrulaması, gerekçeli risk kuyruğu, şikâyet durum/sonuç/itiraz takibi, iki tarafça onaylanan işlem değerlendirmeleri, satıcı geçmişi, fiyat/durum/sıralama filtreleri, izinli uygulama içi arama bildirimleri, başlangıç rehberi, hız/hata ölçümleri ve otomatik veritabanı/medya yedeği uygulandı. 8 maddelik kullanıcı planındaki 7. madde olan kampüs buluşma noktaları eklenmedi. Gerçek SMS için Netgsm aboneliği/OTP paketi/API ayarları, doğal yapay zekâ sohbeti için sunucu OpenAI anahtarı gerekiyor. Varsayılan yerel yedekler tüm disk kaybından korumaz; ayrı depolama gerekir. Diğer büyüme önerileri uygulanmış sayılmaz.
