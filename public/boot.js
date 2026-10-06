@@ -11,6 +11,7 @@ if(window.matchMedia('(display-mode: standalone)').matches||navigator.standalone
  document.addEventListener('unisatis-ready',finish,{once:true});
  // Show the already-rendered page immediately; network requests continue behind it.
  document.addEventListener('DOMContentLoaded',finish,{once:true});
+ setTimeout(finish,300);
  document.addEventListener('DOMContentLoaded',()=>{
   document.querySelector('.launch-retry button')?.addEventListener('click',()=>location.reload());
   setTimeout(()=>{if(!ready){const retry=document.querySelector('.launch-retry');if(retry)retry.hidden=false;}},12000);
