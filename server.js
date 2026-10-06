@@ -662,7 +662,8 @@ app.get('/api/listings', (req, res) => {
   if(req.query.condition){where.push('l.condition=?');args.push(clean(req.query.condition,40));}
   for(const [key,operator] of [['minPrice','>='],['maxPrice','<=']])if(req.query[key]!==undefined&&req.query[key]!==''){const amount=Number(req.query[key]);if(!Number.isFinite(amount)||amount<0||amount>10000000)return fail(res,400,'Geçersiz fiyat aralığı.');where.push(`l.price${operator}?`);args.push(Math.round(amount*100));}
   if(req.query.minPrice!==undefined&&req.query.maxPrice!==undefined&&Number(req.query.minPrice)>Number(req.query.maxPrice))return fail(res,400,'En düşük fiyat en yüksek fiyatı geçemez.');
-  const order=({'price-asc':'l.price ASC,l.id DESC','price-desc':'l.price DESC,l.id DESC',oldest:'l.id ASC'})[req.query.sort]||'l.id DESC';
+  const sortOrders={'price-asc':'l.price ASC,l.id DESC','price-desc':'l.price DESC,l.id DESC',oldest:'l.id ASC'};
+  const order=Object.hasOwn(sortOrders,String(req.query.sort))?sortOrders[String(req.query.sort)]:'l.id DESC';
   const query = normalizeSearch(clean(req.query.q, 100)).trim();
   const terms=searchWords(query);
   const pageSize=terms.length?100:Number(req.query.limit??24);
