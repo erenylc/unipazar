@@ -2,6 +2,14 @@
 
 Üniversite öğrencileri için mobil öncelikli ikinci el pazar ve Dayanışma uygulamasının ilk çalışan sürümü.
 
+## Telefon ve e-posta doğrulaması
+
+Netgsm hesabında OTP SMS paketi, onaylı gönderici başlığı ve API erişimi açıldıktan sonra Railway'in gizli ortam değişkenlerine `NETGSM_USERCODE`, `NETGSM_PASSWORD` ve `NETGSM_HEADER` eklenir. Anahtarları Git'e veya sohbete yazma. Bu üç ayar mevcut olduğunda telefon doğrulaması ilan verme, sohbet başlatma, mesaj gönderme, teklif ve ürün talebi için zorunlu olur. `REQUIRE_CONTACT_VERIFICATION=1` aynı kontrolü hizmet etkin olmasa da zorunlu yapar; servis hazırlanmadan açılırsa kullanıcılar işlem yapamaz. Üretimde bu işlemler için e-posta doğrulaması da zorunludur.
+
+Telefon kodları 3 dakika geçerli, tek kullanımlık ve 5 yanlış denemeden sonra kilitlidir. Tekrar gönderimde 60 saniye beklenir; kullanıcı veya numara başına saatte 3, 24 saatte 6 istek ve varsayılan uygulama toplamı 100/24 saat sınırı bulunur (`SMS_DAILY_LIMIT`). Kodlar veritabanına özet olarak yazılır; sağlayıcı şifresi tarayıcıya veya loglara yazılmaz. SMS başarısızsa doğrulama verilmez. Aynı doğrulanmış numara iki hesaba bağlanamaz; numara değişince doğrulama sıfırlanır. Gerçek SMS olmadan test kodu yalnızca `NODE_ENV=test` ve `TEST_PHONE_CODES=1` birlikteyken kullanılabilir. E-posta kodunda da 5 yanlış deneme sınırı vardır.
+
+Doğrulama, numara/e-posta erişimini kanıtlar; kimlik veya öğrencilik garantisi değildir. Kamuya açık satıcı ekranında sadece doğrulama durumları gösterilir; numara ve adres paylaşılmaz. Hizmet açılmadan gerçek SMS teslimatı tamamlanmış sayılmaz.
+
 ## Android / Google Play hazırlığı
 
 `android/` klasörü, canlı PWA manifestinden üretilmiş Trusted Web Activity projesidir. Paket kimliği şimdilik `com.unisatis.app`, açılış adresi `https://unipazar-production.up.railway.app/#/` ve hedef Android API 36'dır. İlk Play yayını öncesinde paket kimliğini ve kalıcı alan adını kesinleştir; yayınlandıktan sonra paket kimliği değiştirilemez. Bu Android kabuğu canlı siteye ihtiyaç duyar. Uygulamanın mevcut çevrimdışı sayfası dışındaki içerik ve oturumlar sunucudan gelir.

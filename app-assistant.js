@@ -4,6 +4,10 @@ export function matchTopics(message){const text=normalize(message);return helpTo
 const scopedReply=topics=>({answer:topics.length?topics.map(topic=>topic.answer).join('\n\n'):'Üni Satış hakkında kendi sorunu yazabilirsin. Şu anda yapay zekâ bağlantısı etkin değil; ilan, profil, mesajlar ve hesap işlemleri için yardım bilgilerini kullanıyorum.',sources:topics.map(({id,title,link,label})=>({id,title,link,label}))});
 export function cleanHistory(history){return Array.isArray(history)?history.filter(item=>item&&['user','assistant'].includes(item.role)&&typeof item.content==='string').slice(-10).map(item=>({role:item.role,content:item.content.slice(0,2400)})):[];}
 export async function answerAppQuestion(message,{env=process.env,fetchImpl=fetch,history=[]}={}){
+ const text=normalize(message).replace(/[!?.,]/g,'').trim();
+ if(/^(merhaba|selam|selamlar|hey|hello|hi|gunaydin|iyi aksamlar)$/.test(text))return {answer:'Merhaba! Nasıl yardımcı olayım? Üni Satış hakkında sorunu kendi cümlelerinle yazabilirsin.',sources:[],mode:'guide'};
+ if(/^(nasilsin|naber|ne haber)$/.test(text))return {answer:'İyiyim, teşekkür ederim! Sen nasılsın? Uygulamada yapmak istediğin bir işlem veya yaşadığın bir sorun varsa birlikte bakalım.',sources:[],mode:'guide'};
+ if(/^(tesekkurler|tesekkur ederim|sag ol|sagol)$/.test(text))return {answer:'Rica ederim! Başka bir konuda yardımcı olmamı istersen yazabilirsin.',sources:[],mode:'guide'};
  const local=matchTopics(message);
  if(!env.OPENAI_API_KEY?.trim())return {...scopedReply(local),mode:'guide'};
  try{

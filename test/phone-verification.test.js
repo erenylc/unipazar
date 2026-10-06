@@ -1,0 +1,40 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {spawn} from 'node:child_process';
+import {mkdtempSync,rmSync} from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {DatabaseSync} from 'node:sqlite';
+import {normalizePhone,sendPhoneCode} from '../phone-verification.js';
+test('SMS transport normalizes Turkish numbers, checks provider result and hides secrets in failures',async()=>{
+ assert.equal(normalizePhone('0 (555) 123-45-67'),'+905551234567');assert.equal(normalizePhone('+90 5551234567'),'+905551234567');assert.equal(normalizePhone('1234'),null);
+ const env={NETGSM_USERCODE:'test-user',NETGSM_PASSWORD:'secret<&',NETGSM_HEADER:'UniSatis'};
+ await sendPhoneCode('05551234567','123456',{env,fetchImpl:async(url,options)=>{assert.equal(url,'https://api.netgsm.com.tr/sms/send/otp');assert.match(options.body,/<password>secret&lt;&amp;<\/password>/);assert.match(options.body,/<no>5551234567<\/no>/);return new Response('<xml><main><code>0</code></main></xml>');}});
+ await assert.rejects(sendPhoneCode('05551234567','123456',{env,fetchImpl:async()=>new Response('<code>30</code>')}),/SMS delivery failed/);
+ await assert.rejects(sendPhoneCode('05551234567','123456',{env:{}}),/SMS unavailable/);
+});
+test('phone and email ownership checks lock, expire, prevent replay/duplicates and gate trading',async t=>{
+ const temp=mkdtempSync(path.join(os.tmpdir(),'unisatis-verified-contact-')),port=34500+Math.floor(Math.random()*500),base=`http://127.0.0.1:${port}`;
+ const server=spawn(process.execPath,['server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),DATA_DIR:temp,UPLOAD_DIR:path.join(temp,'uploads'),NODE_ENV:'test',TEST_PHONE_CODES:'1',TEST_EMAIL_CODES:'1',REQUIRE_CONTACT_VERIFICATION:'1',LEGAL_ENABLED:'0',NETGSM_USERCODE:'',NETGSM_PASSWORD:'',NETGSM_HEADER:''},stdio:'ignore'});
+ let db;t.after(async()=>{db?.close();await new Promise(resolve=>{server.once('exit',resolve);server.kill();setTimeout(resolve,1000);});rmSync(temp,{recursive:true,force:true,maxRetries:8,retryDelay:100});});
+ for(let i=0;i<100;i++){try{await fetch(base+'/api/me');break;}catch{}await new Promise(resolve=>setTimeout(resolve,100));}
+ const request=async(url,body,cookie,method='POST')=>{const res=await fetch(base+url,{method,headers:{'Content-Type':'application/json',...(cookie?{Cookie:cookie}:{})},body:JSON.stringify(body||{})});return {status:res.status,data:await res.json(),cookie:res.headers.get('set-cookie')?.split(';')[0]};};
+ const fields={name:'Doğrulama Testi',email:'verified@example.test',university:'Munzur Üniversitesi',phone:'05551234567',password:'verification-test-password'};
+ const registered=await request('/api/register',fields);assert.equal(registered.status,201);assert.match(registered.data.devCode,/^\d{6}$/);
+ const signed=await request('/api/verify-email',{email:fields.email,code:registered.data.devCode});const cookie=signed.cookie;assert.ok(cookie);assert.equal(signed.data.user.phoneVerified,false);
+ assert.equal((await request('/api/listings',{},cookie)).data.verificationRequired,'phone');
+ const first=await request('/api/me/phone/send-code',{},cookie);assert.equal(first.status,200);assert.equal((await request('/api/me/phone/send-code',{},cookie)).status,429);
+ for(let i=0;i<5;i++)assert.equal((await request('/api/me/phone/verify',{code:'999999'===first.data.devCode?'000000':'999999'},cookie)).status,400);
+ assert.equal((await request('/api/me/phone/verify',{code:first.data.devCode},cookie)).status,400);
+ db=new DatabaseSync(path.join(temp,'unipazar.sqlite'));db.prepare('UPDATE phone_codes SET sent_at=?').run(Date.now()-61000);
+ const expired=await request('/api/me/phone/send-code',{},cookie);db.prepare('UPDATE phone_codes SET expires_at=?,sent_at=?').run(Date.now()-1,Date.now()-61000);
+ assert.equal((await request('/api/me/phone/verify',{code:expired.data.devCode},cookie)).status,400);
+ const last=await request('/api/me/phone/send-code',{},cookie);const verified=await request('/api/me/phone/verify',{code:last.data.devCode},cookie);assert.equal(verified.status,200);assert.equal(verified.data.user.phoneVerified,true);assert.equal(verified.data.user.phone,'+905551234567');
+ assert.equal((await request('/api/me/phone/verify',{code:last.data.devCode},cookie)).status,400);assert.equal((await request('/api/listings',{},cookie)).status,400);
+ const secondFields={...fields,email:'second@example.test'};const second=await request('/api/register',secondFields);const secondLogin=await request('/api/login',secondFields);assert.equal((await request('/api/listings',{},secondLogin.cookie)).data.verificationRequired,'email');
+ for(let i=0;i<5;i++)await request('/api/verify-email',{email:secondFields.email,code:second.data.devCode==='999999'?'000000':'999999'});
+ assert.equal((await request('/api/verify-email',{email:secondFields.email,code:second.data.devCode})).status,400);
+ db.prepare('UPDATE verification_codes SET expires_at=? WHERE user_id=?').run(Date.now()-15*60000,secondLogin.data.user.id);const resent=await request('/api/resend-code',{email:secondFields.email});const secondVerified=await request('/api/verify-email',{email:secondFields.email,code:resent.data.devCode});assert.equal(secondVerified.status,200);
+ assert.equal((await request('/api/me/phone/send-code',{},secondVerified.cookie)).status,409);
+ const changed=await request('/api/me/phone',{phone:'05557654321',password:fields.password},cookie,'PATCH');assert.equal(changed.data.user.phoneVerified,false);assert.equal((await request('/api/listings',{},cookie)).data.verificationRequired,'phone');
+});

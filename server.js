@@ -7,6 +7,7 @@ import sharp from 'sharp';
 import {preparePhoto, MAX_PHOTO_BYTES} from './image-upload.js';
 import {prepareCheckedPhoto, checkPhoto, moderationEnabled} from './photo-moderation.js';
 import {answerAppQuestion} from './app-assistant.js';
+import {normalizePhone,smsConfigured,sendPhoneCode} from './phone-verification.js';
 import {legalDocuments, validateLegalAcceptance} from './legal-documents.js';
 import {verifyGoogleCredential} from './google-login.js';
 import nodemailer from 'nodemailer';
@@ -23,6 +24,8 @@ if (fs.existsSync(path.join(root,'.env'))) process.loadEnvFile(path.join(root,'.
 const localMode=process.argv.includes('--local');
 const dev = localMode || process.env.NODE_ENV !== 'production';
 const testEmailCodes = process.env.NODE_ENV === 'test' && process.env.TEST_EMAIL_CODES === '1';
+const testPhoneCodes=process.env.NODE_ENV==='test'&&process.env.TEST_PHONE_CODES==='1';
+const phoneVerificationRequired=()=>smsConfigured()||process.env.REQUIRE_CONTACT_VERIFICATION==='1';
 const port = Number(process.env.PORT || 3000);
 const universities = JSON.parse(fs.readFileSync(path.join(root, 'universities.json'), 'utf8'));
 const universityNames = new Set(universities);
@@ -145,6 +148,11 @@ if (!db.prepare('PRAGMA table_info(users)').all().some(column => column.name ===
 if (!db.prepare('PRAGMA table_info(users)').all().some(column => column.name === 'phone')) {
   db.exec('ALTER TABLE users ADD COLUMN phone TEXT');
 }
+if(!db.prepare('PRAGMA table_info(users)').all().some(column=>column.name==='phone_verified'))db.exec('ALTER TABLE users ADD COLUMN phone_verified INTEGER NOT NULL DEFAULT 0');
+if(!db.prepare('PRAGMA table_info(verification_codes)').all().some(column=>column.name==='attempts'))db.exec('ALTER TABLE verification_codes ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0');
+db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS verified_phone_unique ON users(phone) WHERE phone_verified=1;
+CREATE TABLE IF NOT EXISTS phone_codes(user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,phone TEXT NOT NULL,code_hash TEXT NOT NULL,expires_at INTEGER NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,sent_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS sms_attempts(id INTEGER PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,phone TEXT NOT NULL,sent_at INTEGER NOT NULL);`);
 if (!db.prepare('PRAGMA table_info(users)').all().some(column => column.name === 'support_verified')) {
   db.exec('ALTER TABLE users ADD COLUMN support_verified INTEGER NOT NULL DEFAULT 0');
 }
@@ -272,7 +280,7 @@ const verifyPassword = async (password, stored) => {
 };
 const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res)).catch(next);
 const fail = (res, code, error) => res.status(code).json({ error });
-const publicUser = user => user && ({ id: user.id, name: user.name, email: user.email, phone:user.phone || '', avatarUrl:user.avatar_filename?'/api/users/'+user.id+'/avatar?v='+encodeURIComponent(user.avatar_filename):null, university: user.university, emailVerified: !!user.email_verified, studentStatus: user.student_status, needsSupport: !!user.support_verified, supportStatus:db.prepare('SELECT status FROM support_applications WHERE user_id=?').get(user.id)?.status || 'none', role: user.role });
+const publicUser = user => user && ({ id: user.id, name: user.name, email: user.email, phone:user.phone || '', phoneVerified:!!user.phone_verified, avatarUrl:user.avatar_filename?'/api/users/'+user.id+'/avatar?v='+encodeURIComponent(user.avatar_filename):null, university: user.university, emailVerified: !!user.email_verified, studentStatus: user.student_status, needsSupport: !!user.support_verified, supportStatus:db.prepare('SELECT status FROM support_applications WHERE user_id=?').get(user.id)?.status || 'none', role: user.role });
 const currentUser = req => {
   const token = /(?:^|; )up_session=([^;]+)/.exec(req.headers.cookie || '')?.[1];
   if (!token) return null;
@@ -288,6 +296,13 @@ const requireAdmin = (req, res) => {
   if (user && user.role !== 'admin') fail(res, 403, 'Bu işlem için yönetici yetkisi gerekiyor.');
   return user?.role === 'admin' ? user : null;
 };
+app.use('/api',(req,res,next)=>{
+ const trading=req.method==='POST'&&(/^\/listings(?:\/\d+\/(?:conversation|offers|requests))?$/.test(req.path)||/^\/conversations\/\d+\/messages$/.test(req.path));
+ if(!trading)return next();const user=currentUser(req);if(!user)return next();
+ if((!dev||phoneVerificationRequired())&&!user.email_verified)return res.status(403).json({error:'Bu işlem için Hesabım sayfasından e-postanı doğrula.',verificationRequired:'email'});
+ if(phoneVerificationRequired()&&!user.phone_verified)return res.status(403).json({error:'Bu işlem için Hesabım sayfasından telefonunu SMS koduyla doğrula.',verificationRequired:'phone'});
+ next();
+});
 const setSession = (res, userId, rememberMe = false) => {
   const token = randomBytes(32).toString('hex');
   const duration = rememberMe ? 30 * 86400000 : 12 * 3600000;
@@ -307,7 +322,13 @@ const issueCode = async user => {
   return testEmailCodes ? code : undefined;
 };
 
-app.get('/api/me', (req, res) => {res.set('Cache-Control','no-store');res.json({ user: publicUser(currentUser(req)),emailVerificationAvailable:emailVerificationAvailable(),googleClientId,legalVersion:legal?.version || null });});
+function validEmailCode(user,code){
+ if(!user)return false;const record=db.prepare('SELECT * FROM verification_codes WHERE user_id=?').get(user.id);
+ if(!record||record.expires_at<Date.now()||record.attempts>=5)return false;
+ if(!/^\d{6}$/.test(code)||record.code_hash!==hash(code)){db.prepare('UPDATE verification_codes SET attempts=attempts+1 WHERE user_id=?').run(user.id);return false;}
+ return true;
+}
+app.get('/api/me', (req, res) => {res.set('Cache-Control','no-store');res.json({ user: publicUser(currentUser(req)),emailVerificationAvailable:emailVerificationAvailable(),phoneVerificationAvailable:smsConfigured()||testPhoneCodes,contactVerificationRequired:phoneVerificationRequired(),emailVerificationRequired:!dev||phoneVerificationRequired(),googleClientId,legalVersion:legal?.version || null });});
 app.get('/legal/:document', (req,res)=>{
   const document=legal?.[req.params.document];
   if(!document || !['privacy','terms'].includes(req.params.document))return res.status(404).send('Metin henüz yayımlanmadı.');
@@ -380,7 +401,7 @@ app.post('/api/verify-email', (req, res) => {
   const email = clean(req.body.email, 160).toLowerCase(), code = clean(req.body.code, 10);
   const user = db.prepare('SELECT * FROM users WHERE email=?').get(email);
   const record = user && db.prepare('SELECT * FROM verification_codes WHERE user_id=?').get(user.id);
-  if (!user || user.closed_at || !record || record.expires_at < Date.now() || record.code_hash !== hash(code)) return fail(res, 400, 'Kod geçersiz veya süresi dolmuş.');
+  if (!user || user.closed_at || !validEmailCode(user,code)) return fail(res, 400, 'Kod geçersiz, deneme sınırı dolmuş veya süresi geçmiş.');
   db.prepare('UPDATE users SET email_verified=1 WHERE id=?').run(user.id);
   db.prepare('DELETE FROM verification_codes WHERE user_id=?').run(user.id);
   setSession(res, user.id, req.body.rememberMe === true);
@@ -507,7 +528,7 @@ app.patch('/api/me/email', wrap(async (req, res) => {
   if (db.prepare('SELECT id FROM users WHERE email=? AND id<>?').get(email,user.id)) return fail(res,409,'Bu e-posta zaten kayıtlı.');
   db.prepare('UPDATE users SET email=?,email_verified=0 WHERE id=?').run(email,user.id);
   let devCode;
-  if (mailer || testEmailCodes) {
+  if (emailVerificationAvailable()) {
     try { devCode = await issueCode(db.prepare('SELECT * FROM users WHERE id=?').get(user.id)); }
     catch {
       db.prepare('DELETE FROM verification_codes WHERE user_id=?').run(user.id);
@@ -522,14 +543,39 @@ app.patch('/api/me/phone', wrap(async (req, res) => {
   if (user.phone && !await verifyPassword(String(req.body.password || ''),user.password_hash)) return fail(res,403,'Mevcut şifreni doğru gir.');
   const phone = clean(req.body.phone,20).replace(/\s/g,'');
   if (!/^(?:\+90|0)?5\d{9}$/.test(phone)) return fail(res,400,'Geçerli bir cep telefonu numarası gir.');
-  db.prepare('UPDATE users SET phone=? WHERE id=?').run(phone,user.id);
+  db.prepare('UPDATE users SET phone=?,phone_verified=0 WHERE id=?').run(phone,user.id); db.prepare('DELETE FROM phone_codes WHERE user_id=?').run(user.id);
   res.json({ user:publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(user.id)) });
 }));
+app.post('/api/me/phone/send-code',authLimit,wrap(async(req,res)=>{
+ const user=requireUser(req,res);if(!user)return;
+ const phone=normalizePhone(user.phone);if(!phone)return fail(res,400,'Önce geçerli bir telefon numarası ekle.');
+ if(user.phone_verified)return res.json({message:'Telefonun zaten doğrulanmış.'});
+ if(!smsConfigured()&&!testPhoneCodes)return fail(res,503,'SMS doğrulama hizmeti henüz etkin değil. Numaran doğrulanmış sayılmadı.');
+ const now=Date.now(),previous=db.prepare('SELECT sent_at FROM phone_codes WHERE user_id=?').get(user.id);
+ if(previous&&now-previous.sent_at<60000)return res.status(429).set('Retry-After','60').json({error:'Yeni SMS istemeden önce 60 saniye bekle.'});
+ if(db.prepare('SELECT id FROM users WHERE phone=? AND phone_verified=1 AND id<>?').get(phone,user.id))return fail(res,409,'Bu numara başka bir hesaba bağlı.');
+ db.prepare('DELETE FROM sms_attempts WHERE sent_at<?').run(now-86400000);
+ const hour=db.prepare('SELECT count(*) AS n FROM sms_attempts WHERE (user_id=? OR phone=?) AND sent_at>?').get(user.id,phone,now-3600000).n;
+ const daily=db.prepare('SELECT count(*) AS n FROM sms_attempts WHERE user_id=? OR phone=?').get(user.id,phone).n;
+ const total=db.prepare('SELECT count(*) AS n FROM sms_attempts').get().n;
+ if(hour>=3||daily>=6||total>=Math.max(1,Number(process.env.SMS_DAILY_LIMIT||100)))return fail(res,429,'SMS gönderim sınırına ulaşıldı. Daha sonra tekrar dene.');
+ const code=randomCode();db.prepare('INSERT INTO sms_attempts(user_id,phone,sent_at) VALUES(?,?,?)').run(user.id,phone,now);
+ db.prepare('INSERT OR REPLACE INTO phone_codes(user_id,phone,code_hash,expires_at,attempts,sent_at) VALUES(?,?,?,?,0,?)').run(user.id,phone,hash(code),now+180000,now);
+ try{if(!testPhoneCodes)await sendPhoneCode(phone,code);}catch{db.prepare('DELETE FROM phone_codes WHERE user_id=? AND code_hash=?').run(user.id,hash(code));return fail(res,503,'SMS gönderilemedi. Telefonun doğrulanmadı.');}
+ res.json({message:'Doğrulama kodu SMS ile gönderildi. Kod 3 dakika geçerli.',retryAfter:60,...(testPhoneCodes?{devCode:code}:{})});
+}));
+app.post('/api/me/phone/verify',authLimit,(req,res)=>{
+ const user=requireUser(req,res);if(!user)return;const code=clean(req.body.code,10),record=db.prepare('SELECT * FROM phone_codes WHERE user_id=?').get(user.id);
+ if(!record||record.expires_at<Date.now()||record.attempts>=5||record.phone!==normalizePhone(user.phone))return fail(res,400,'Kod geçersiz veya süresi dolmuş. Yeni kod iste.');
+ if(!/^\d{6}$/.test(code)||record.code_hash!==hash(code)){db.prepare('UPDATE phone_codes SET attempts=attempts+1 WHERE user_id=?').run(user.id);return fail(res,400,'Kod yanlış. En fazla 5 deneme yapabilirsin.');}
+ try{transaction(()=>{db.prepare('UPDATE users SET phone=?,phone_verified=1 WHERE id=?').run(record.phone,user.id);db.prepare('DELETE FROM phone_codes WHERE user_id=?').run(user.id);});}catch{return fail(res,409,'Bu numara başka bir hesapta doğrulanmış.');}
+ res.json({user:publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(user.id))});
+});
 app.post('/api/me/verify-email', (req, res) => {
   const user = requireUser(req,res); if (!user) return;
   const code = clean(req.body.code,10);
   const record = db.prepare('SELECT * FROM verification_codes WHERE user_id=?').get(user.id);
-  if (!record || record.expires_at < Date.now() || record.code_hash !== hash(code)) return fail(res,400,'Kod geçersiz veya süresi dolmuş.');
+  if (!validEmailCode(user,code)) return fail(res,400,'Kod geçersiz, deneme sınırı dolmuş veya süresi geçmiş.');
   db.prepare('UPDATE users SET email_verified=1 WHERE id=?').run(user.id);
   db.prepare('DELETE FROM verification_codes WHERE user_id=?').run(user.id);
   res.json({ user:publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(user.id)) });
@@ -581,7 +627,7 @@ const listingSearchScore = (row, normalizedQuery, queryWords) => {
   if(queryWords.every(query=>allWords.some(word=>closeWord(query,word))))return 3;
   return null;
 };
-const listingSelect = `SELECT l.*, u.name AS seller_name, u.closed_at AS seller_closed,
+const listingSelect = `SELECT l.*, u.name AS seller_name, u.closed_at AS seller_closed,u.email_verified AS seller_email_verified,u.phone_verified AS seller_phone_verified,
  (SELECT filename FROM listing_images i WHERE i.listing_id=l.id ORDER BY position LIMIT 1) AS cover,
  (SELECT COUNT(*) FROM listing_images i WHERE i.listing_id=l.id) AS image_count
  FROM listings l JOIN users u ON u.id=l.seller_id`;
@@ -618,7 +664,7 @@ app.get('/api/listings/:id', (req, res) => {
   res.json({ listing: { ...row, images, favorite } });
 });
 app.get('/api/sellers/:id/listings', (req, res) => {
-  const seller = db.prepare('SELECT id,name,university,avatar_filename FROM users WHERE id=? AND closed_at IS NULL').get(req.params.id);
+  const seller = db.prepare('SELECT id,name,university,avatar_filename,email_verified,phone_verified FROM users WHERE id=? AND closed_at IS NULL').get(req.params.id);
   if (!seller) return fail(res,404,'Satıcı bulunamadı.');
   const listings = db.prepare(`${listingSelect} WHERE l.seller_id=? AND l.kind='sale' AND l.status='active' ORDER BY l.created_at DESC`).all(seller.id);
   seller.avatarUrl=seller.avatar_filename?'/api/users/'+seller.id+'/avatar?v='+encodeURIComponent(seller.avatar_filename):null;delete seller.avatar_filename;res.json({ seller, listings });
