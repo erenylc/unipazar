@@ -629,6 +629,8 @@ const assistantAttempts=new Map();let assistantActive=0,assistantDay='',assistan
 setInterval(()=>{for(const [key,entry] of assistantAttempts)if(entry.reset<Date.now())assistantAttempts.delete(key);},60000).unref();
 app.post('/api/assistant',async(req,res)=>{
  const message=req.body?.message;
+ const history=req.body?.history;
+ if(history!==undefined&&(!Array.isArray(history)||history.length>10||history.some(item=>!item||!['user','assistant'].includes(item.role)||typeof item.content!=='string'||item.content.length>2400)))return fail(res,400,'Sohbet geçmişi geçersiz.');
  if(typeof message!=='string'||!message.trim()||message.length>600)return fail(res,400,'Sorunu 1 ile 600 karakter arasında yaz.');
  const now=Date.now(),entry=assistantAttempts.get(req.ip)||{count:0,reset:now+60000};
  if(now>entry.reset){entry.count=0;entry.reset=now+60000;}
@@ -639,7 +641,7 @@ app.post('/api/assistant',async(req,res)=>{
  const useAI=assistantDailyCount<Math.max(0,Number(process.env.APP_ASSISTANT_DAILY_LIMIT||200));
  if(useAI&&process.env.OPENAI_API_KEY)assistantDailyCount++;
  assistantActive++;
- try{res.set('Cache-Control','no-store').json(await answerAppQuestion(message.trim(),{env:useAI?process.env:{}}));}
+ try{res.set('Cache-Control','no-store').json(await answerAppQuestion(message.trim(),{env:useAI?process.env:{},history}));}
  finally{assistantActive--;}
 });
 app.post('/api/photos/check',(req,res,next)=>{if(requireUser(req,res))next();},upload.single('photo'),async(req,res)=>{

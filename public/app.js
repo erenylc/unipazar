@@ -107,7 +107,6 @@ async function loadListings(){
   state.listings=(await api('/api/listings?'+params)).listings;
 }
 async function refreshSearchResults(query){
- if(route()==='/'&&state.user)renderOtherUniversityListings();
  const params=new URLSearchParams();
  for(const [key,value] of Object.entries(state.filters)) if(value && !(key==='university' && value==='*')) params.set(key,value);
  const grid=$('.grid'), filters=JSON.stringify(state.filters);
@@ -125,30 +124,15 @@ async function refreshSearchResults(query){
   $('.grid').setAttribute('aria-busy','false');
  }catch(error){if(isCurrent()){toast(error.message);grid.setAttribute('aria-busy','false');}}
 }
-let otherUniversityRequest=0;
-async function renderOtherUniversityListings(){
- const grid=$('#otherUniversityListings .grid');if(!grid||!state.user)return;
- const request=++otherUniversityRequest,user=state.user;
- const params=new URLSearchParams({kind:'sale',otherUniversities:'1'});
- for(const key of ['q','category'])if(state.filters[key])params.set(key,state.filters[key]);
- grid.setAttribute('aria-busy','true');
- try{
-  const {listings}=await api('/api/listings?'+params);
-  if(request!==otherUniversityRequest||grid!==$('#otherUniversityListings .grid')||route()!=='/'||state.user?.id!==user.id)return;
-  grid.innerHTML=listings.length?listings.map(listingCard).join(''):empty('Diğer üniversitelerde henüz ilan yok','Yeni satış ilanları burada görünecek.');
-  grid.setAttribute('aria-busy','false');applyLocale(grid,language);
- }catch(error){if(request===otherUniversityRequest&&grid.isConnected){grid.innerHTML=empty('İlanlar yüklenemedi','Tekrar yüklemek için aşağıdaki düğmeyi kullan.')+'<button type="button" class="btn btn-outline" data-action="retry-other-universities">Tekrar dene</button>';grid.setAttribute('aria-busy','false');}}
-}
 async function renderBrowse(donations=false){
  if(donations && !state.user?.needsSupport){go('/support');return;}
  state.filters.kind=donations?'donation':'sale';
   if(donations && state.user) state.filters.university=state.user.university;
- if(!donations && state.user) state.filters.university=state.user.university;
+ if(!donations && state.user && !state.filters.university) state.filters.university=state.user.university;
  await loadListings();
  if(route()!==(donations?'/donation':'/'))return;
   const title=donations?'Dayanışma ilanları':'Üniversitende neler var?';
-  pageFrame(`<main class="shell page">${donations?`<section class="hero"><div class="hero-copy"><div class="eyebrow">♧ Bir eşya, yeni bir başlangıç</div><h1>Paylaştıkça üniversiten güzelleşir.</h1><p>Kullanmadığın eşyaları ücretsiz ver; ihtiyacı olan bir öğrencinin işine yarasın.</p><button class="btn" data-action="sell-donation">Ücretsiz ürün ver →</button></div><div class="hero-art"><img src="/hero-illustration.svg" alt="İkinci el alışveriş ve öğrenci dayanışması çizimi"></div></section>`:`<section class="hero"><div class="hero-copy"><div class="eyebrow">Üni Satış · Öğrenci pazarı ve dayanışma</div><h1>Öğrenciler arasında<br>ikinci el alışveriş.</h1><p>Üniversitendeki öğrencilerle ikinci el ürün alıp sat. İstersen kullanmadığın eşyaları ihtiyacı olan öğrencilere ücretsiz ver.</p><button class="btn" data-action="sell">İlan ver →</button></div><div class="hero-art"><img src="/hero-illustration.svg" alt="İkinci el alışveriş ve öğrenci dayanışması çizimi"></div></section>`}<div class="campus-strip"><span class="campus-label">${state.user?'Üniversiten:':'Üniversite seç:'}</span>${donations||state.user?`<span class="campus-pill campus-own">${universityLogo(state.user.university,true)}${escapeHtml(state.user.university)}</span>`:`<button class="campus-picker" data-action="choose-university" aria-label="İlanları görmek için üniversite seç"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m2 9 10-5 10 5-10 5L2 9Zm4 3v5c3.8 2.8 8.2 2.8 12 0v-5M22 9v7"/></svg><span>${escapeHtml(state.filters.university==='*'?'Tüm üniversiteler':state.filters.university||'Üniversite seç')}</span>${universityLogo(state.filters.university,true)}<b aria-hidden="true">⌄</b></button>`}${!state.user?'<span>Üniversite seçerek ilanları inceleyebilirsin.</span>':''}</div>${donations?`<div class="panel donation-process"><h2>Dayanışma nasıl işler?</h2><div class="steps"><div><strong>1. Ürünü incele</strong><p>Üniversitendeki ücretsiz ürünleri ve açıklamalarını gör.</p></div><div><strong>2. Talep gönder</strong><p>İhtiyacın olan ürüne kısa bir notla talep gönder.</p></div><div><strong>3. Teslim al</strong><p>Bağışçı seçerse güvenli bir noktada teslim alın.</p></div></div><p class="small muted">Aynı anda en fazla 3 açık talep gönderebilirsin.</p></div>`:''}<div class="section-head"><div><h2>${title}</h2><p>${donations?'Ücretsiz ürünleri destek isteyen öğrenciler görebilir ve talep edebilir.':'Öğrencilerin yeni eklediği ilanlar'}</p></div><span class="muted small result-count">${state.listings.length} ilan</span></div><div class="filters"><label class="search"><span>⌕</span><input id="searchInput" placeholder="Ürün, kitap, marka ara..." value="${escapeHtml(state.filters.q)}" aria-label="Ürün ara"></label><details class="category-menu"><summary>${escapeHtml(state.filters.category||'Tüm kategoriler')} <span>⌄</span></summary><div class="category-options">${['',...categories].map(c=>`<button type="button" data-action="filter-category" data-category="${escapeHtml(c)}" aria-pressed="${state.filters.category===c}">${escapeHtml(c||'Tüm kategoriler')}</button>`).join('')}</div></details></div><div class="grid">${state.listings.length?state.listings.map(listingCard).join(''):empty('Henüz ilan yok','İlk ilanı sen verebilirsin.')}</div>${!donations?`<div class="donation-banner"><div><h2>Dayanışma da üniversitenin bir parçası.</h2><p>Kullanmadığın bir eşya başka bir öğrencinin ihtiyacını karşılayabilir.</p></div><a class="btn btn-primary" href="#/sell-donation">Ücretsiz ürün ver →</a></div>`:''}</main>`,donations?'/donation':'/');
- if(!donations&&state.user){$('main').insertAdjacentHTML('beforeend','<section id="otherUniversityListings" class="other-university-section" aria-labelledby="otherUniversityTitle"><div class="section-head"><div><h2 id="otherUniversityTitle">Diğer üniversitelerde satılan eşyalar</h2><p>Diğer kampüslerdeki öğrencilerin ikinci el satış ilanları</p></div></div><div class="grid other-university-grid" aria-busy="true"><p class="muted" role="status">İlanlar yükleniyor…</p></div></section>');renderOtherUniversityListings();}
+  pageFrame(`<main class="shell page">${donations?`<section class="hero"><div class="hero-copy"><div class="eyebrow">♧ Bir eşya, yeni bir başlangıç</div><h1>Paylaştıkça üniversiten güzelleşir.</h1><p>Kullanmadığın eşyaları ücretsiz ver; ihtiyacı olan bir öğrencinin işine yarasın.</p><button class="btn" data-action="sell-donation">Ücretsiz ürün ver →</button></div><div class="hero-art"><img src="/hero-illustration.svg" alt="İkinci el alışveriş ve öğrenci dayanışması çizimi"></div></section>`:`<section class="hero"><div class="hero-copy"><div class="eyebrow">Üni Satış · Öğrenci pazarı ve dayanışma</div><h1>Öğrenciler arasında<br>ikinci el alışveriş.</h1><p>Üniversitendeki öğrencilerle ikinci el ürün alıp sat. İstersen kullanmadığın eşyaları ihtiyacı olan öğrencilere ücretsiz ver.</p><button class="btn" data-action="sell">İlan ver →</button></div><div class="hero-art"><img src="/hero-illustration.svg" alt="İkinci el alışveriş ve öğrenci dayanışması çizimi"></div></section>`}<div class="campus-strip"><span class="campus-label">Üniversite seç:</span>${donations?`<span class="campus-pill campus-own">${universityLogo(state.user.university,true)}${escapeHtml(state.user.university)}</span>`:`<button class="campus-picker" data-action="choose-university" aria-label="İlanları görmek için üniversite seç"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m2 9 10-5 10 5-10 5L2 9Zm4 3v5c3.8 2.8 8.2 2.8 12 0v-5M22 9v7"/></svg><span>${escapeHtml(state.filters.university==='*'?'Tüm üniversiteler':state.filters.university||'Üniversite seç')}</span>${universityLogo(state.filters.university,true)}<b aria-hidden="true">⌄</b></button>`}${!state.user?'<span>Üniversite seçerek ilanları inceleyebilirsin.</span>':''}</div>${donations?`<div class="panel donation-process"><h2>Dayanışma nasıl işler?</h2><div class="steps"><div><strong>1. Ürünü incele</strong><p>Üniversitendeki ücretsiz ürünleri ve açıklamalarını gör.</p></div><div><strong>2. Talep gönder</strong><p>İhtiyacın olan ürüne kısa bir notla talep gönder.</p></div><div><strong>3. Teslim al</strong><p>Bağışçı seçerse güvenli bir noktada teslim alın.</p></div></div><p class="small muted">Aynı anda en fazla 3 açık talep gönderebilirsin.</p></div>`:''}<div class="section-head"><div><h2>${title}</h2><p>${donations?'Ücretsiz ürünleri destek isteyen öğrenciler görebilir ve talep edebilir.':'Öğrencilerin yeni eklediği ilanlar'}</p></div><span class="muted small result-count">${state.listings.length} ilan</span></div><div class="filters"><label class="search"><span>⌕</span><input id="searchInput" placeholder="Ürün, kitap, marka ara..." value="${escapeHtml(state.filters.q)}" aria-label="Ürün ara"></label><details class="category-menu"><summary>${escapeHtml(state.filters.category||'Tüm kategoriler')} <span>⌄</span></summary><div class="category-options">${['',...categories].map(c=>`<button type="button" data-action="filter-category" data-category="${escapeHtml(c)}" aria-pressed="${state.filters.category===c}">${escapeHtml(c||'Tüm kategoriler')}</button>`).join('')}</div></details></div><div class="grid">${state.listings.length?state.listings.map(listingCard).join(''):empty('Henüz ilan yok','İlk ilanı sen verebilirsin.')}</div>${!donations?`<div class="donation-banner"><div><h2>Dayanışma da üniversitenin bir parçası.</h2><p>Kullanmadığın bir eşya başka bir öğrencinin ihtiyacını karşılayabilir.</p></div><a class="btn btn-primary" href="#/sell-donation">Ücretsiz ürün ver →</a></div>`:''}</main>`,donations?'/donation':'/');
 }
 async function renderDetail(id){
  const {listing:l}=await api('/api/listings/'+id);if(route()!=='/listing/'+id)return;
@@ -625,7 +609,8 @@ function showDetailPhoto(index){
  if(!detailPhotos.length)return;
  detailPhotoIndex=(index+detailPhotos.length)%detailPhotos.length;
  const photo=detailPhotos[detailPhotoIndex],main=$('#detailMainPhoto');if(!main)return;
- main.src=photo.src;main.alt=photo.alt;
+ const changed=main.getAttribute('src')!==photo.src;main.src=photo.src;main.alt=photo.alt;
+ if(changed&&!matchMedia('(prefers-reduced-motion: reduce)').matches)main.animate([{opacity:.45,transform:'translateX(14px)'},{opacity:1,transform:'translateX(0)'}],{duration:170,easing:'ease-out'});
  $('#detailPhotoCounter').textContent=`${detailPhotoIndex+1} / ${detailPhotos.length}`;
  document.querySelectorAll('[data-action="carousel-show"]').forEach((button,i)=>button.classList.toggle('active',i===detailPhotoIndex));
 }
@@ -637,9 +622,15 @@ function decorateDetail(){
   gallery.innerHTML=`<div class="carousel-main"><img id="detailMainPhoto" alt=""><button type="button" class="carousel-arrow prev" data-action="carousel-prev" aria-label="Önceki fotoğraf">‹</button><button type="button" class="carousel-arrow next" data-action="carousel-next" aria-label="Sonraki fotoğraf">›</button><span class="carousel-counter" id="detailPhotoCounter"></span></div>${detailPhotos.length>1?`<div class="carousel-thumbs">${detailPhotos.map((photo,index)=>`<button type="button" data-action="carousel-show" data-index="${index}" aria-label="${index+1}. fotoğraf"><img src="${escapeHtml(photo.src.replace(/width=1600$/,'width=160'))}" alt=""></button>`).join('')}</div>`:''}`;
   showDetailPhoto(0);
   if(detailPhotos.length===1)gallery.querySelectorAll('.carousel-arrow').forEach(button=>button.hidden=true);
-  let startX=0;const main=gallery.querySelector('.carousel-main');
-  main.addEventListener('touchstart',event=>{startX=event.touches[0].clientX},{passive:true});
-  main.addEventListener('touchend',event=>{const distance=event.changedTouches[0].clientX-startX;if(Math.abs(distance)>45)showDetailPhoto(detailPhotoIndex+(distance<0?1:-1))},{passive:true});
+  const main=gallery.querySelector('.carousel-main'),image=main.querySelector('img');image.draggable=false;main.tabIndex=0;main.setAttribute('role','button');main.setAttribute('aria-label','Fotoğrafı büyüt; yön tuşlarıyla fotoğraf değiştir');
+  let gesture=null,suppressClick=false;
+  main.addEventListener('pointerdown',event=>{if(event.target.closest('button')||event.button!==0)return;gesture={x:event.clientX,y:event.clientY,id:event.pointerId};suppressClick=false;main.setPointerCapture(event.pointerId);});
+  main.addEventListener('pointermove',event=>{if(!gesture||event.pointerId!==gesture.id)return;const dx=event.clientX-gesture.x,dy=event.clientY-gesture.y;if(Math.abs(dx)>12&&Math.abs(dx)>Math.abs(dy)){suppressClick=true;main.classList.add('dragging');image.style.transform=`translateX(${dx*.35}px)`;}});
+  const finishGesture=event=>{if(!gesture)return;const dx=event.clientX-gesture.x,dy=event.clientY-gesture.y;gesture=null;main.classList.remove('dragging');image.style.transform='';if(event.type!=='pointercancel'&&Math.abs(dx)>45&&Math.abs(dx)>Math.abs(dy)&&detailPhotos.length>1)showDetailPhoto(detailPhotoIndex+(dx<0?1:-1));};
+  main.addEventListener('pointerup',finishGesture);main.addEventListener('pointercancel',finishGesture);
+  main.addEventListener('click',event=>{if(event.target.closest('button')||suppressClick){suppressClick=false;return;}showPhotoViewer(detailPhotos[detailPhotoIndex].src,detailPhotos[detailPhotoIndex].alt);});
+  main.addEventListener('keydown',event=>{if(event.target!==main)return;if(['ArrowLeft','ArrowRight','Enter',' '].includes(event.key))event.preventDefault();if(event.key==='ArrowLeft')showDetailPhoto(detailPhotoIndex-1);if(event.key==='ArrowRight')showDetailPhoto(detailPhotoIndex+1);if(event.key==='Enter'||event.key===' ')showPhotoViewer(detailPhotos[detailPhotoIndex].src,detailPhotos[detailPhotoIndex].alt);});
+  detailPhotos.slice(1).forEach(photo=>{const preload=new Image();preload.src=photo.src;});
  }
  const sellerId=Number($('.detail-side .seller-link')?.getAttribute('href')?.split('/').pop());
  if(state.user?.id===sellerId&&['active','reserved'].includes($('.detail-side').dataset.listingStatus)){
@@ -701,7 +692,6 @@ document.addEventListener('click',async event=>{
  if(target){event.preventDefault();document.querySelectorAll('.message-menu[open]').forEach(menu=>menu.removeAttribute('open')); const action=target.dataset.action,id=target.dataset.id;
   try{
    if(action==='close-modal') return closeModal();
-   if(action==='retry-other-universities')return renderOtherUniversityListings();
    if(action==='faq'){showSimpleModal('Yardım merkezi','',faqContent());$('#modal-root .modal')?.classList.add('faq-modal');return;}
    if(action==='view-avatar'){if(state.user?.avatarUrl)showPhotoViewer(state.user.avatarUrl,'Profil fotoğrafı',true);else showProfilePhotoOptions();return;}
    if(action==='preview-listing-photo'){const file=selectedListingPhotos[Number(target.dataset.index)];if(file)showPhotoViewer(listingPreview(file),'Ürün fotoğrafı');return;}
