@@ -1,0 +1,98 @@
+{
+  "at": "2026-10-07T18:23:39.378Z",
+  "node": "v24.13.0",
+  "host": {
+    "cpu": "13th Gen Intel(R) Core(TM) i7-13620H",
+    "cores": 16,
+    "ramGB": 32
+  },
+  "scope": "isolated loopback API test; not production, not browser/device smoothness or end-to-end SMS/image processing",
+  "config": {
+    "users": 10000,
+    "listings": 50000,
+    "messagesSeeded": 100000,
+    "seconds": 30,
+    "rps": 1000,
+    "concurrency": 256,
+    "diverseSearch": true,
+    "sharedIP": true
+  },
+  "integrity": {
+    "persistedMessages": 101276,
+    "expectedMessages": 101276,
+    "persistedOffers": 638,
+    "expectedOffers": 638
+  },
+  "sse": {
+    "requested": 10000,
+    "connected": 10000,
+    "active": 10000,
+    "errors": 0,
+    "events": 5552,
+    "expectedEvents": 2552
+  },
+  "http": {
+    "scheduled": 30000,
+    "completed": 12768,
+    "dropped": 17232,
+    "status": {
+      "200": 11492,
+      "201": 1276
+    },
+    "errors": {},
+    "p95Ms": 726,
+    "p99Ms": 789
+  },
+  "routes": {
+    "browse": {
+      "requests": 5112,
+      "errors": 0,
+      "p95Ms": 729,
+      "p99Ms": 788
+    },
+    "unread": {
+      "requests": 1914,
+      "errors": 0,
+      "p95Ms": 725,
+      "p99Ms": 791
+    },
+    "conversations": {
+      "requests": 1914,
+      "errors": 0,
+      "p95Ms": 722,
+      "p99Ms": 777
+    },
+    "messages": {
+      "requests": 1914,
+      "errors": 0,
+      "p95Ms": 719,
+      "p99Ms": 779
+    },
+    "search": {
+      "requests": 638,
+      "errors": 0,
+      "p95Ms": 731,
+      "p99Ms": 923
+    },
+    "send": {
+      "requests": 638,
+      "errors": 0,
+      "p95Ms": 736,
+      "p99Ms": 926
+    },
+    "offer": {
+      "requests": 638,
+      "errors": 0,
+      "p95Ms": 733,
+      "p99Ms": 789
+    }
+  },
+  "server": {
+    "peakRssMB": 376,
+    "peakLoopP99Ms": 410
+  },
+  "gate": {
+    "passes": false,
+    "definition": "no HTTP/SSE errors, missing notifications or dropped offered load; all SSE streams remain active; p95 API latency below 500ms"
+  }
+}

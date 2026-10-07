@@ -895,10 +895,16 @@ app.get('/api/conversations/:id/messages', (req, res) => {
   const user = requireUser(req,res); if (!user) return;
   const conversation = db.prepare('SELECT * FROM conversations WHERE id=?').get(req.params.id);
   if (!conversation || ![conversation.buyer_id,conversation.seller_id].includes(user.id)) return fail(res,404,'Konuşma bulunamadı.');
-  const readResult=req.query.preview==='1'?{changes:0}:db.prepare('UPDATE messages SET read_at=? WHERE conversation_id=? AND sender_id<>? AND read_at IS NULL').run(Date.now(),conversation.id,user.id);
+  const before=req.query.before===undefined?null:Number(req.query.before);
+  if(before!==null&&(!Number.isSafeInteger(before)||before<1||typeof req.query.before!=='string'))return fail(res,400,'Geçersiz mesaj sayfası.');
+  const hasUnread=req.query.preview!=='1'&&db.prepare('SELECT 1 FROM messages WHERE conversation_id=? AND sender_id<>? AND read_at IS NULL LIMIT 1').get(conversation.id,user.id);
+  const readResult=hasUnread?db.prepare('UPDATE messages SET read_at=? WHERE conversation_id=? AND sender_id<>? AND read_at IS NULL').run(Date.now(),conversation.id,user.id):{changes:0};
   if(readResult.changes)notifyConversation(conversation,user.id);
   const cleared=db.prepare('SELECT cleared_through FROM conversation_views WHERE user_id=? AND conversation_id=?').get(user.id,conversation.id)?.cleared_through||0;
-  res.json({ messages:db.prepare('SELECT id,sender_id,body,created_at,photo_filename,voice_filename,read_at FROM messages WHERE conversation_id=? AND id>? ORDER BY id ASC LIMIT 200').all(conversation.id,cleared) });
+  const args=before===null?[conversation.id,cleared]:[conversation.id,cleared,before];
+  const rows=db.prepare(`SELECT id,sender_id,body,created_at,photo_filename,voice_filename,read_at FROM messages WHERE conversation_id=? AND id>?${before===null?'':' AND id<?'} ORDER BY id DESC LIMIT 201`).all(...args);
+  const hasOlder=rows.length>200,messages=rows.slice(0,200).reverse();
+  res.json({messages,page:{hasOlder,before:hasOlder?messages[0].id:null,viewBefore:before}});
 });
 app.post('/api/conversations/:id/clear',(req,res)=>{
  const user=requireUser(req,res);if(!user)return;

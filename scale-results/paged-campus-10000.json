@@ -1,0 +1,91 @@
+{
+  "at": "2026-10-06T19:24:51.108Z",
+  "node": "v24.13.0",
+  "host": {
+    "cpu": "13th Gen Intel(R) Core(TM) i7-13620H",
+    "cores": 16,
+    "ramGB": 32
+  },
+  "scope": "isolated loopback API test; not production, not browser/device smoothness or end-to-end SMS/image processing",
+  "config": {
+    "users": 10000,
+    "listings": 50000,
+    "messagesSeeded": 100000,
+    "seconds": 60,
+    "rps": 1000,
+    "concurrency": 256,
+    "diverseSearch": true
+  },
+  "sse": {
+    "requested": 10000,
+    "connected": 10000,
+    "active": 10000,
+    "errors": 0,
+    "events": 9152,
+    "expectedEvents": 9152
+  },
+  "http": {
+    "scheduled": 59996,
+    "completed": 45770,
+    "dropped": 14226,
+    "status": {
+      "200": 41194,
+      "201": 4576
+    },
+    "errors": {},
+    "p95Ms": 423,
+    "p99Ms": 469
+  },
+  "routes": {
+    "browse": {
+      "requests": 18312,
+      "errors": 0,
+      "p95Ms": 425,
+      "p99Ms": 470
+    },
+    "unread": {
+      "requests": 6866,
+      "errors": 0,
+      "p95Ms": 424,
+      "p99Ms": 471
+    },
+    "conversations": {
+      "requests": 6864,
+      "errors": 0,
+      "p95Ms": 424,
+      "p99Ms": 469
+    },
+    "messages": {
+      "requests": 6864,
+      "errors": 0,
+      "p95Ms": 416,
+      "p99Ms": 462
+    },
+    "search": {
+      "requests": 2288,
+      "errors": 0,
+      "p95Ms": 419,
+      "p99Ms": 464
+    },
+    "send": {
+      "requests": 2288,
+      "errors": 0,
+      "p95Ms": 420,
+      "p99Ms": 467
+    },
+    "offer": {
+      "requests": 2288,
+      "errors": 0,
+      "p95Ms": 424,
+      "p99Ms": 471
+    }
+  },
+  "server": {
+    "peakRssMB": 471,
+    "peakLoopP99Ms": 268
+  },
+  "gate": {
+    "passes": false,
+    "definition": "no HTTP/SSE errors, missing notifications or dropped offered load; all SSE streams remain active; p95 API latency below 500ms"
+  }
+}

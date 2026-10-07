@@ -23,10 +23,12 @@ test('öğrenci pazarı ve Dayanışma akışları', async t => {
     await new Promise(resolve=>{server.once('exit',resolve);server.kill();setTimeout(resolve,1500);});
     rmSync(temp,{recursive:true,force:true,maxRetries:10,retryDelay:100});
   });
-  for(let i=0;i<50;i++){
-    try { if((await fetch(base+'/api/me')).ok) break; } catch {}
+  let ready=false;
+  for(let i=0;i<150;i++){
+    try { if((await fetch(base+'/api/me')).ok){ready=true;break;} } catch {}
     await new Promise(resolve=>setTimeout(resolve,100));
   }
+  assert.ok(ready,'Test sunucusu 15 saniye içinde hazır olmalı.');
   const users = {};
   async function request(path, method='GET', body, user){
     const headers={}; if(user?.cookie) headers.cookie=user.cookie;

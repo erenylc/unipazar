@@ -1,5 +1,6 @@
 import {chatIcons,avatarMarkup} from './chat-ui.js';
 import {optimizePhoto} from './photo-upload.js';
+import {createRefreshQueue} from './live-refresh.js';
 import {helpTopics} from './help-topics.js';
 import {validateRegistration} from './registration-validation.js';
 import {authModal} from './auth-templates.js';
@@ -213,6 +214,8 @@ let messagesRenderSequence=0;
 
 let chatConversations=[],chatRenderedId=null;
 const chatMessages=new Map(),chatDrafts=new Map();
+const chatHistoryBefore=new Map();
+const messagePageURL=id=>`/api/conversations/${id}/messages${chatHistoryBefore.has(id)?'?before='+chatHistoryBefore.get(id):''}`;
 function conversationById(id){return chatConversations.find(c=>c.id===Number(id));}
 function decorateChatOptions(conversations,selected){
  document.querySelectorAll('.chat-list [data-conversation]').forEach(link=>{
@@ -290,14 +293,16 @@ async function renderMessages(){
  const originRoute=route(),sequence=++messagesRenderSequence,requestedConversation=state.selectedConversation;
  const [conversationResult,requestedMessages]=await Promise.all([
   api('/api/conversations'),
-  requestedConversation?api(`/api/conversations/${requestedConversation}/messages`):Promise.resolve(null)
+  requestedConversation?api(messagePageURL(requestedConversation)):Promise.resolve(null)
  ]);
  if(route()!==originRoute||sequence!==messagesRenderSequence)return;
  const allConversations=conversationResult.conversations;chatConversations=allConversations;
  const adminChat=route().startsWith('/admin-message/');
  const conversations=allConversations.filter(c=>(!adminChat?(state.user.role!=='admin'||c.listing_id):c.id===state.selectedConversation)&&(c.last_message||c.id===state.selectedConversation));
  const selected=conversations.find(c=>c.id===state.selectedConversation)||{id:null,other_name:'',other_university:'',other_id:0,listing_id:0,title:''};
- const messages=selected.id?(selected.id===requestedConversation?requestedMessages:await api(`/api/conversations/${selected.id}/messages`)).messages:[];
+ const messageResult=selected.id?(selected.id===requestedConversation?requestedMessages:await api(messagePageURL(selected.id))):{messages:[],page:{}};
+ const messages=messageResult.messages;
+ if(route()===originRoute&&sequence===messagesRenderSequence&&selected.id&&chatHistoryBefore.has(selected.id)&&!messages.length){chatHistoryBefore.delete(selected.id);return renderMessages();}
  if(route()!==originRoute||sequence!==messagesRenderSequence)return;
  if(selected.id)selected.unread_count=0;
  state.selectedConversation=selected.id;
@@ -318,6 +323,12 @@ async function renderMessages(){
  }
  decorateChatOptions(conversations,selected);
  chatMessages.set(selected.id,messages);
+ if(selected.id&&(messageResult.page?.hasOlder||chatHistoryBefore.has(selected.id))){
+  const navigation=document.createElement('div');navigation.className='message-history-nav';
+  if(messageResult.page?.hasOlder){const older=document.createElement('button');older.type='button';older.className='btn btn-outline';older.dataset.action='older-messages';older.dataset.before=messageResult.page.before;older.textContent='Önceki mesajlar';navigation.append(older);}
+  if(chatHistoryBefore.has(selected.id)){const latest=document.createElement('button');latest.type='button';latest.className='btn btn-outline';latest.dataset.action='latest-messages';latest.textContent='Yeni mesajlara dön';navigation.append(latest);}
+  $('.messages')?.prepend(navigation);
+ }
  const prefetchGeneration=cacheGeneration,prefetchUser=state.user.id;
  conversations.slice(0,8).filter(c=>!chatMessages.has(c.id)).forEach(c=>api(`/api/conversations/${c.id}/messages?preview=1`).then(data=>{if(cacheGeneration===prefetchGeneration&&state.user?.id===prefetchUser&&!chatMessages.has(c.id))chatMessages.set(c.id,data.messages);}).catch(()=>{}));
  applyLocale($('.messages-page'),language);
@@ -687,27 +698,30 @@ async function refreshUnread(){
   state.unreadCount=state.user?(await api('/api/unread-count')).count:0;
   document.querySelectorAll('.message-count').forEach(badge=>{badge.hidden=state.unreadCount===0;badge.textContent=state.unreadCount>99?'99+':String(state.unreadCount);});
 }
-let messageStream=null, streamUserId=null, liveRenderTimer=null;
+let messageStream=null, streamUserId=null, liveNeedsMessages=false;
+const liveRefreshQueue=createRefreshQueue(async()=>{
+ const needsMessages=liveNeedsMessages;liveNeedsMessages=false;
+ if(needsMessages&&(route()==='/messages'||route().startsWith('/admin-message/'))&&!document.hidden&&voiceRecorder?.state!=='recording')await renderMessages();
+ else await refreshUnread();
+},{onError:error=>toast(error.message)});
 function connectMessageStream(){
  if(streamUserId===state.user?.id && messageStream)return;
  messageStream?.close();messageStream=null;chatMessages.clear();chatDrafts.clear();chatConversations=[];chatRenderedId=null;streamUserId=state.user?.id||null;
+ chatHistoryBefore.clear();
+ liveRefreshQueue.cancel();liveNeedsMessages=false;
  if(!streamUserId)return;
  messageStream=new EventSource('/api/message-events');
  messageStream.onopen=()=>{
   responseCache.delete('/api/conversations');chatMessages.clear();
-  refreshUnread().catch(()=>{});
-  if(route()==='/messages'&&!document.hidden&&voiceRecorder?.state!=='recording')renderMessages().catch(error=>toast(error.message));
+  liveNeedsMessages=true;liveRefreshQueue.request();
  };
  messageStream.onmessage=event=>{
   let payload;try{payload=JSON.parse(event.data)}catch{return;}
+  document.dispatchEvent(new CustomEvent('unisatis-message-event',{detail:payload}));
   responseCache.delete('/api/conversations');chatMessages.delete(payload.conversationId);
   if(payload.resync)chatMessages.clear();
-  if(payload.senderId===state.user?.id){refreshUnread().catch(()=>{});return;}
-  clearTimeout(liveRenderTimer);
-  liveRenderTimer=setTimeout(()=>{
-   if((route()==='/messages'||route().startsWith('/admin-message/')) && !document.hidden && voiceRecorder?.state!=='recording') renderMessages().catch(error=>toast(error.message));
-   else refreshUnread().catch(()=>{});
-  },60);
+  if(payload.senderId!==state.user?.id||payload.resync)liveNeedsMessages=true;
+  liveRefreshQueue.request();
  };
 }
 document.addEventListener('visibilitychange',()=>{
@@ -721,6 +735,8 @@ document.addEventListener('click',async event=>{
  if(target){event.preventDefault();document.querySelectorAll('.message-menu[open]').forEach(menu=>menu.removeAttribute('open')); const action=target.dataset.action,id=target.dataset.id;
   try{
    if(action==='close-modal') return closeModal();
+   if(action==='older-messages'){chatHistoryBefore.set(state.selectedConversation,Number(target.dataset.before));chatMessages.delete(state.selectedConversation);return await renderMessages();}
+   if(action==='latest-messages'){chatHistoryBefore.delete(state.selectedConversation);chatMessages.delete(state.selectedConversation);return await renderMessages();}
    if(action==='faq'){showSimpleModal('Yardım merkezi','',faqContent());$('#modal-root .modal')?.classList.add('faq-modal');return;}
    if(action==='view-avatar'){if(state.user?.avatarUrl)showPhotoViewer(state.user.avatarUrl,'Profil fotoğrafı',true);else showProfilePhotoOptions();return;}
    if(action==='verify-phone')return showPhoneVerification();
@@ -887,6 +903,7 @@ document.addEventListener('submit',async event=>{
    if(voiceClip)body.set('voice',voiceClip);
    if(!String(body.get('body')||'').trim() && !chatPhoto && !voiceClip)throw new Error('Mesaj yaz, fotoğraf veya ses kaydı ekle.');
    await api(`/api/conversations/${state.selectedConversation}/messages`,{method:'POST',body});
+   chatHistoryBefore.delete(state.selectedConversation);chatMessages.delete(state.selectedConversation);
    chatPhoto=null;chatDrafts.delete(state.selectedConversation);discardVoiceRecording();form.reset();return renderMessages();
   }
   if(type==='handoff'){await api(`/api/conversations/${state.selectedConversation}/handoff`,{method:'POST',body:data});closeModal();toast('Buluşma önerisi gönderildi.');return render();}

@@ -3,6 +3,7 @@ node_modules/
 dist/
 build/
 coverage/
+/scale-results/local-latest.json
 .cache/
 *.log
 
