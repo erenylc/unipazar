@@ -27,7 +27,7 @@ test('phone and email ownership checks lock, expire, prevent replay/duplicates a
  for(let i=0;i<5;i++)assert.equal((await request('/api/me/phone/verify',{code:'999999'===first.data.devCode?'000000':'999999'},cookie)).status,400);
  assert.equal((await request('/api/me/phone/verify',{code:first.data.devCode},cookie)).status,400);
  db=new DatabaseSync(path.join(temp,'unipazar.sqlite'));db.prepare('UPDATE phone_codes SET sent_at=?').run(Date.now()-61000);
- const expired=await request('/api/me/phone/send-code',{},cookie);db.prepare('UPDATE phone_codes SET expires_at=?,sent_at=?').run(Date.now()-1,Date.now()-61000);
+ const expired=await request('/api/me/phone/send-code',{},cookie);db.prepare('UPDATE phone_codes SET expires_at=?,sent_at=?').run(Date.now()-60000,Date.now()-61000);
  assert.equal((await request('/api/me/phone/verify',{code:expired.data.devCode},cookie)).status,400);
  const last=await request('/api/me/phone/send-code',{},cookie);const verified=await request('/api/me/phone/verify',{code:last.data.devCode},cookie);assert.equal(verified.status,200);assert.equal(verified.data.user.phoneVerified,true);assert.equal(verified.data.user.phone,'+905551234567');
  assert.equal((await request('/api/me/phone/verify',{code:last.data.devCode},cookie)).status,400);assert.equal((await request('/api/listings',{},cookie)).status,400);

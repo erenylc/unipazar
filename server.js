@@ -10,6 +10,8 @@ import {answerAppQuestion} from './app-assistant.js';
 import {normalizePhone,smsConfigured,sendPhoneCode} from './phone-verification.js';
 import {registerProductFeatures} from './product-features.js';
 import {registerOperations} from './operations.js';
+import {registerNotifications} from './notifications.js';
+import {registerReportEmail} from './report-email.js';
 import {legalDocuments, validateLegalAcceptance} from './legal-documents.js';
 import {verifyGoogleCredential} from './google-login.js';
 import nodemailer from 'nodemailer';
@@ -184,7 +186,8 @@ setInterval(expireListings, 60 * 60 * 1000).unref();
 
 const messageHub=createMessageHub();
 const messageStreams=messageHub.streams;
-const notifyConversation=(conversation,senderId)=>messageHub.notify(conversation,senderId);
+let pushNotifications=null;
+const notifyConversation=(conversation,senderId)=>{messageHub.notify(conversation,senderId);pushNotifications?.notify(conversation,senderId).catch(()=>{});};
 
 // Existing message IDs and foreign-key targets are preserved during this migration.
 if (db.prepare('PRAGMA table_info(conversations)').all().find(c=>c.name==='listing_id').notnull) {
@@ -336,8 +339,10 @@ function validEmailCode(user,code){
  return true;
 }
 app.use('/api/me/university-email',authLimit);
-registerProductFeatures({app,db,requireUser,requireAdmin,fail,hash,randomCode,universities,uploadDir,searchExpression:value=>listingSearch.expression(searchWords(value),closeWord),emailAvailable:emailVerificationAvailable,testEmailCodes,sendMail:async(email,subject,text)=>{if(testEmailCodes)return;if(brevoConfigured())return sendBrevoTextEmail(email,subject,text);if(mailer)return mailer.sendMail({from:process.env.SMTP_FROM,to:email,subject,text});throw new Error('Email unavailable');}});
+const reportEmails=registerReportEmail({db,sendMail:async(email,subject,text)=>{if(testEmailCodes)return;if(brevoConfigured())return sendBrevoTextEmail(email,subject,text,fetch,{senderEmail:'unisatis06@gmail.com'});if(mailer)return mailer.sendMail({from:'unisatis06@gmail.com',to:email,subject,text});throw new Error('Email unavailable');}});
+registerProductFeatures({app,db,requireUser,requireAdmin,fail,hash,randomCode,universities,uploadDir,reportEmails,searchExpression:value=>listingSearch.expression(searchWords(value),closeWord),emailAvailable:emailVerificationAvailable,testEmailCodes,sendMail:async(email,subject,text)=>{if(testEmailCodes)return;if(brevoConfigured())return sendBrevoTextEmail(email,subject,text);if(mailer)return mailer.sendMail({from:process.env.SMTP_FROM,to:email,subject,text});throw new Error('Email unavailable');}});
 registerOperations({app,db,requireAdmin,fail,dataDir,uploadDir});
+pushNotifications=registerNotifications({app,db,requireUser,fail,hash});
 app.get('/api/me', (req, res) => {res.set('Cache-Control','no-store');res.json({ user: publicUser(currentUser(req)),emailVerificationAvailable:emailVerificationAvailable(),phoneVerificationAvailable:smsConfigured()||testPhoneCodes,contactVerificationRequired:phoneVerificationRequired(),emailVerificationRequired:!dev||phoneVerificationRequired(),googleClientId,legalVersion:legal?.version || null });});
 app.get('/legal/:document', (req,res)=>{
   const document=legal?.[req.params.document];

@@ -33,7 +33,7 @@ def twaManifest = [
     navigationDividerColor: '#000000', // The navbar divider color.
     navigationDividerColorDark: '#000000', // The dark navbar divider color.
     backgroundColor: '#F6F6F1', // The color used for the splash screen background.
-    enableNotifications: false, // Set to true to enable notification delegation.
+    enableNotifications: true, // Delegate supported web notifications to the Android app.
     // Every shortcut must include the following fields:
     // - name: String that will show up in the shortcut.
     // - short_name: Shorter string used if |name| is too long.
@@ -58,8 +58,8 @@ android {
         applicationId "com.unisatis.app"
         minSdkVersion 21
         targetSdkVersion 36
-        versionCode 4
-        versionName "1.0.3"
+        versionCode 5
+        versionName "1.0.4"
 
         // The name for the application
         resValue "string", "appName", twaManifest.name

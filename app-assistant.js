@@ -9,7 +9,14 @@ export async function answerAppQuestion(message,{env=process.env,fetchImpl=fetch
  if(/^(nasilsin|naber|ne haber)$/.test(text))return {answer:'İyiyim, teşekkür ederim! Sen nasılsın? Uygulamada yapmak istediğin bir işlem veya yaşadığın bir sorun varsa birlikte bakalım.',sources:[],mode:'guide'};
  if(/^(tesekkurler|tesekkur ederim|sag ol|sagol)$/.test(text))return {answer:'Rica ederim! Başka bir konuda yardımcı olmamı istersen yazabilirsin.',sources:[],mode:'guide'};
  const local=matchTopics(message);
- if(!env.OPENAI_API_KEY?.trim())return {...scopedReply(local),mode:'guide'};
+ if(!env.OPENAI_API_KEY?.trim()){
+  if(local.length)return {...scopedReply(local),mode:'guide'};
+  const aliases=[[/ilan|satcam|satacag|satabil|urun ekle|esya sat/,'listing'],[/mesaj|sohbet|yazis/,'messages'],[/arama|filtre|fiyat arali|sirala/,'saved-searches'],[/sikayet|sikayetim|itiraz/,'report-tracking'],[/giris|kayit|hesap ac/,'login'],[/fotograf|resim|profil/,'photos'],[/bildirim|ses gel|uyari/,'notifications']];
+  const id=aliases.find(([pattern])=>pattern.test(text))?.[1],topic=helpTopics.find(t=>t.id===id);
+  if(topic)return {...scopedReply([topic]),mode:'guide'};
+  if(/^(peki|sonra|nasil|nereden|onu|bunu)/.test(text)){const prior=cleanHistory(history).filter(item=>item.role==='user').at(-1);const context=prior&&matchTopics(prior.content);if(context?.length)return {...scopedReply(context),mode:'guide'};}
+  return {answer:'Yardımcı olayım. Uygulamada ne yapmak istiyorsun: ilan vermek, satıcıya mesaj yazmak, hesabını düzenlemek veya bildirimleri açmak mı? Sorunu biraz daha anlatırsan ilgili adımları gösterebilirim.',sources:[],mode:'guide'};
+ }
  try{
   const response=await fetchImpl('https://api.openai.com/v1/responses',{
    method:'POST',headers:{Authorization:`Bearer ${env.OPENAI_API_KEY.trim()}`,'Content-Type':'application/json'},signal:AbortSignal.timeout(20000),

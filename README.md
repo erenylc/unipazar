@@ -2,6 +2,12 @@
 
 Üniversite öğrencileri için mobil öncelikli ikinci el pazar ve Dayanışma uygulamasının ilk çalışan sürümü.
 
+## Mesaj bildirimleri ve şikâyet e-postaları
+
+Hesabım > Mesaj bildirimleri > Bildirimleri aç ile her cihaz kendi tarayıcı iznini verir. Web Push anahtarları ilk açılışta üretilip özel veritabanında saklanır; dışarıya yalnızca açık anahtar verilir. Abonelik oturuma bağlıdır; çıkış/şifre sıfırlama oturumu silince abonelik de silinir. Kilit ekranına özel mesaj metni yazılmaz. Bildirime dokunmak ilgili sohbeti açar. Uygulama açıkken üst bildirim, bilgisayarda ilk kullanıcı etkileşiminden sonra kapatılabilir ses vardır. iPhone/iPad için destekleyen sürümde ana ekrana eklenmiş uygulama ve cihaz izni gerekir. Gerçek cihaz teslimatı cihaz/ağ/izin durumuna bağlıdır; otomatik testler sahte push taşıyıcısıyla çalışır.
+
+Şikâyet durumunu yönetici güncellediğinde doğrulanmış başvuru sahibine durum ve yönetici açıklaması e-posta kuyruğuna alınır. Gönderici `unisatis06@gmail.com` olarak ayarlanır; Brevo/SMTP bu göndericiyi onaylamış olmalıdır. Özel şikâyet metni e-postaya kopyalanmaz. Geçici başarısız gönderimler üç denemeye kadar tekrar edilir; API'nin kabul etmesi gelen kutusuna teslim garantisi değildir. Durum güncellemesi gönderim süresini bekletmez.
+
 ## Üniversite e-postası
 
 Üniversite e-postası `Hesabım` üzerinden ayrıca doğrulanabilir: `.edu.tr` posta kutusuna tek kullanımlık kod gönderilir. Bu rozet yalnızca bu posta kutusuna erişimi kanıtlar; seçilen üniversiteye veya öğrenciliğe ilişkin belge onayı değildir.

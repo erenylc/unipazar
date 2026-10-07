@@ -11,7 +11,7 @@
   "navigationDividerColor": "#000000",
   "navigationDividerColorDark": "#000000",
   "backgroundColor": "#F6F6F1",
-  "enableNotifications": false,
+  "enableNotifications": true,
   "startUrl": "/#/",
   "iconUrl": "https://unipazar-production.up.railway.app/icons/icon-512.png",
   "maskableIconUrl": "https://unipazar-production.up.railway.app/icons/icon-maskable.png",
@@ -20,8 +20,8 @@
     "path": "android.keystore",
     "alias": "unisatis"
   },
-  "appVersionName": "1.0.3",
-  "appVersionCode": 4,
+  "appVersionName": "1.0.4",
+  "appVersionCode": 5,
   "shortcuts": [],
   "generatorApp": "unknown",
   "webManifestUrl": "https://unipazar-production.up.railway.app/manifest.webmanifest",
@@ -43,5 +43,5 @@
   "fileHandlers": [],
   "launchHandlerClientMode": "",
   "displayOverride": [],
-  "appVersion": "1.0.3"
+  "appVersion": "1.0.4"
 }

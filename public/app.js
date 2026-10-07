@@ -265,7 +265,7 @@ document.addEventListener('toggle',event=>{
  menu.classList.remove('upward');const panel=menu.querySelector('div'),area=menu.closest('.messages');
  if(panel&&area&&panel.getBoundingClientRect().bottom>area.getBoundingClientRect().bottom-8)menu.classList.add('upward');
 },true);
-function closeOutsideMenus(event){for(const selector of ['.message-menu','.category-menu','.language-menu'])document.querySelectorAll(selector+'[open]').forEach(menu=>{if(!menu.contains(event.target))menu.open=false;});}
+function closeOutsideMenus(event){for(const selector of ['.message-menu','.category-menu','.language-menu','.advanced-filter-menu'])document.querySelectorAll(selector+'[open]').forEach(menu=>{if(!menu.contains(event.target))menu.open=false;});}
 document.addEventListener('pointerdown',closeOutsideMenus);
 document.addEventListener('click',closeOutsideMenus);
 let backdropPress=false;
@@ -385,7 +385,7 @@ async function renderAdmin(){
   <div class="section-head"><div><h2>Destek başvuruları (${pending.length})</h2><p>Yalnızca destek formunu gönderen hesaplar burada görünür. Tam TC kimlik numarası alınmaz; yalnızca son 4 hanesi saklanır.</p></div></div>
   <div class="list">${pending.length?pending.map(supportRow).join(''):empty('Bekleyen destek başvurusu yok','')}</div>
   ${reviewed.length?`<div class="section-head"><h2>Karara bağlanan başvurular</h2></div><div class="list">${reviewed.map(supportRow).join('')}</div>`:''}
-  <div class="section-head"><h2>Şikâyetler (${queue.reports.length})</h2></div>
+  <div class="section-head"><h2 id="adminReportHeading">Şikâyetler (${queue.reports.length})</h2></div>
   <div class="list">${queue.reports.length?queue.reports.map(report=>`<div class="list-row"><div><strong>${report.message_id?`Mesaj #${report.message_id}`:report.conversation_id?`Sohbet #${report.conversation_id}`:`İlan #${report.listing_id}`}</strong><small>${escapeHtml(report.reason)}</small></div><div class="inline-actions">${report.conversation_id?`<button class="btn btn-outline" data-action="admin-review-form" data-id="${report.conversation_id}" data-title="Şikâyet edilen sohbet">Konuşmayı incele</button>`:`<button class="btn btn-danger" data-action="admin-report" data-id="${report.id}" data-remove="1">İlanı kaldır</button>`}<button class="btn btn-outline" data-action="admin-report" data-id="${report.id}">Kapat</button></div></div>`).join(''):empty('Açık şikâyet yok','')}</div>
   <div class="section-head"><div><h2>Hesaplar</h2><p>Toplam ${accountData.total} hesap · ${accountData.active} açık hesap</p></div></div>
   <label class="field admin-account-search"><span>Hesap ara</span><input id="adminAccountSearch" type="search" placeholder="Ad veya e-posta yaz"></label>
@@ -687,7 +687,7 @@ for(const event of ['pointerover','focusin','touchstart'])document.addEventListe
 let navigationSequence=0;
 function showRouteLoading(path){
  const label=path==='/messages'?'Mesajlar':path==='/favorites'?'Favoriler':path==='/mine'?'İlanlarım':path==='/admin'?'Yönetim':'İlanlar';
- pageFrame(`<main class="shell page route-loading" aria-busy="true"><div class="loading-line"></div><div class="loading-title">${label} yükleniyor…</div><div class="loading-card"></div><div class="loading-card"></div></main>`,path);
+ const main=$('#app main');if(main){main.setAttribute('aria-busy','true');if(!main.querySelector('.navigation-progress'))main.insertAdjacentHTML('afterbegin','<div class="navigation-progress" role="status">'+label+' açılıyor…</div>');}
 }
 async function render(){const path=route(),sequence=++navigationSequence;
  if(!state.user&&accountRoutes.has(path)){showAuth();return;}
@@ -801,7 +801,7 @@ document.addEventListener('click',async event=>{
    if(action==='auth-tab'){state.googleProfile=null;state.authTab=target.dataset.tab;return drawModal();}
    if(action==='sell'){ if(!state.user)return showAuth(); return go('/sell'); }
    if(action==='sell-donation'){ if(!state.user)return showAuth(); return go('/sell-donation'); }
-   if(action==='filter-category'){state.filters.category=target.dataset.category;return render();}
+   if(action==='filter-category'){state.filters.category=target.dataset.category;const menu=target.closest('.category-menu');if(menu){menu.open=false;menu.querySelector('summary').innerHTML=escapeHtml(state.filters.category||'Tüm kategoriler')+' <span>⌄</span>';}return refreshSearchResults(state.filters.q||'');}
    if(action==='toggle-theme'){const change=()=>{theme=theme==='dark'?'light':'dark';localStorage.setItem('unipazar-theme',theme);applyTheme();const button=document.querySelector('.theme-toggle');button.innerHTML=themeIcon();button.setAttribute('aria-label',theme==='dark'?'Açık moda geç':'Karanlık moda geç');button.title=theme==='dark'?'Açık mod':'Karanlık mod';};change();return;}
    if(action==='set-language'){language=target.dataset.language;localStorage.setItem('unipazar-language',language);return render();}
    if(action==='carousel-prev')return showDetailPhoto(detailPhotoIndex-1);
@@ -863,7 +863,7 @@ document.addEventListener('click',async event=>{
    if(action==='admin-review-form'){closeModal();go('/admin-messages/'+(target.dataset.account||'report')+'/'+id);return;}
    if(action==='remove-support-form')return showSimpleModal('Başvuruyu kaldır','Destek erişimi kapatılacak ve sonuçlanan başvuru listeden kaldırılacak.',`<form data-form="remove-support" data-id="${id}"><div class="inline-actions"><button class="btn btn-danger">Onayla ve kaldır</button><button type="button" class="btn btn-outline" data-action="close-modal">Vazgeç</button></div></form>`);
    if(action==='admin-support'){await api(`/api/admin/support/${id}`,{method:'PATCH',body:{status:target.dataset.status}});toast('Destek başvurusu güncellendi.');return render();}
-   if(action==='admin-report'){await api(`/api/admin/reports/${id}`,{method:'PATCH',body:{removeListing:!!target.dataset.remove}});toast('Şikâyet kapatıldı.');return render();}
+   if(action==='admin-report'){target.disabled=true;try{await api(`/api/admin/reports/${id}`,{method:'PATCH',body:{removeListing:!!target.dataset.remove}});const row=target.closest('.list-row'),list=row?.parentElement;row?.remove();if(list){const count=list.querySelectorAll('.list-row').length;const heading=$('#adminReportHeading');if(heading)heading.textContent=heading.textContent.replace(/\(\d+\)/,'('+count+')');if(!count)list.innerHTML=empty('Açık şikâyet yok','');}document.dispatchEvent(new CustomEvent('unisatis-report-updated',{detail:{id:Number(id),status:'closed'}}));toast('Şikâyet kapatıldı.');}finally{if(target.isConnected)target.disabled=false;}return;}
    if(action==='resend-profile-code'){const result=await api('/api/resend-code',{method:'POST',body:{email:state.user.email}});state.devCode=result.devCode||'';toast(result.message);return render();}
   }catch(error){toast(error.message);}
  }
@@ -933,4 +933,4 @@ api('/api/listings?kind=sale').catch(()=>{});
 refreshUser().then(async()=>{refreshUnread().catch(()=>{});if(!state.user && accountRoutes.has(route()))history.replaceState(null,'',location.pathname+location.search+'#/');await render();}).catch(error=>{pageFrame(`<main class="shell page"><section class="panel"><h2>Bağlantı kurulamadı</h2><p>İnternet bağlantını kontrol edip tekrar deneyebilirsin.</p><button class="btn btn-primary" data-action="reload-app">Tekrar dene</button></section></main>`,route());toast(error.message);}).finally(()=>document.dispatchEvent(new Event('unisatis-ready')));
 // SSE delivers updates immediately; periodic reads only recover lost connections.
 setInterval(()=>{if(state.user&&!document.hidden&&messageStream?.readyState!==EventSource.OPEN)refreshUnread().catch(()=>{});},30000);
-export {api,state,render,go,showSimpleModal,closeModal,toast,escapeHtml,listingCard,refreshUser};
+export {api,state,render,go,showSimpleModal,closeModal,toast,escapeHtml,listingCard,refreshUser,refreshSearchResults};
