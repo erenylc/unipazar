@@ -1,0 +1,43 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import express from 'express';
+import {DatabaseSync} from 'node:sqlite';
+import {registerCommerce} from '../commerce.js';
+
+test('checkout drafts keep prices authoritative, private and idempotent; cannot receive payment or reserve stock',async t=>{
+  const db=new DatabaseSync(':memory:');
+  db.exec(`PRAGMA foreign_keys=ON;
+    CREATE TABLE users(id INTEGER PRIMARY KEY,name TEXT,closed_at TEXT);
+    CREATE TABLE listings(id INTEGER PRIMARY KEY,seller_id INTEGER,kind TEXT,title TEXT,description TEXT,condition TEXT,price INTEGER,university TEXT,status TEXT);
+    CREATE TABLE blocked_users(blocker_id INTEGER,blocked_id INTEGER);
+    INSERT INTO users VALUES(1,'Buyer',NULL),(2,'Seller',NULL),(3,'Other',NULL);
+    INSERT INTO listings VALUES(1,2,'sale','Book','Marked pages','Used',12000,'Other university','active'),(2,2,'donation','Gift','','Used',0,'Other university','active');`);
+  const app=express();app.use(express.json());
+  const fail=(res,code,error)=>res.status(code).json({error});
+  const requireUser=(req,res)=>{const user=db.prepare('SELECT * FROM users WHERE id=?').get(Number(req.headers['test-user'])||0);if(!user)fail(res,401,'Login');return user;};
+  registerCommerce({app,db,fail,requireUser});
+  const server=app.listen(0,'127.0.0.1');await new Promise(resolve=>server.once('listening',resolve));
+  t.after(async()=>{await new Promise(resolve=>server.close(resolve));db.close();});
+  const base='http://127.0.0.1:'+server.address().port;
+  async function call(path,method='GET',body,user=1){const response=await fetch(base+'/api/commerce'+path,{method,headers:{'test-user':String(user),'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});return {status:response.status,data:await response.json()};}
+  assert.equal((await call('/drafts','GET',null,0)).status,401);
+  assert.equal((await call('/drafts','POST',{listingId:1,delivery:'shipping'},2)).status,400);
+  assert.equal((await call('/drafts','POST',{listingId:2,delivery:'shipping'})).status,404);
+  assert.equal((await call('/drafts','POST',{listingId:1,delivery:'fake'})).status,400);
+  const first=await call('/drafts','POST',{listingId:1,delivery:'shipping',price:1,paid:true,total:1});
+  assert.equal(first.status,201);assert.equal(first.data.draft.snapshot.price,12000);assert.equal(first.data.draft.snapshot.total,null);assert.equal(first.data.configuration.paymentAvailable,false);
+  const second=await call('/drafts','POST',{listingId:1,delivery:'campus'});
+  assert.equal(second.status,200);assert.equal(second.data.draft.id,first.data.draft.id);assert.equal(second.data.draft.delivery,'campus');
+  assert.equal(db.prepare('SELECT status FROM listings WHERE id=1').get().status,'active');
+  assert.equal((await call('/drafts','GET',null,3)).data.drafts.length,0);
+  assert.equal((await call('/drafts/'+first.data.draft.id+'/pay','POST',{paid:true},3)).status,404);
+  assert.equal((await call('/drafts/'+first.data.draft.id+'/pay','POST',{paid:true})).status,503);
+  assert.equal((await call('/drafts/'+first.data.draft.id,'DELETE',null,3)).status,404);
+  db.exec('INSERT INTO blocked_users VALUES(2,1)');
+  assert.equal((await call('/drafts','POST',{listingId:1,delivery:'shipping'})).status,403);db.exec('DELETE FROM blocked_users');
+  db.exec("UPDATE listings SET status='sold' WHERE id=1");assert.equal((await call('/drafts','POST',{listingId:1,delivery:'shipping'})).status,409);
+  assert.equal((await call('/drafts/'+first.data.draft.id,'DELETE')).status,200);
+  assert.equal((await call('/drafts')).data.drafts.length,0);
+  db.exec("UPDATE listings SET status='active' WHERE id=1");await call('/drafts','POST',{listingId:1,delivery:'shipping'});
+  db.exec('DELETE FROM users WHERE id=1');assert.equal(db.prepare('SELECT COUNT(*) count FROM checkout_drafts').get().count,0);
+});

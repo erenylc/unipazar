@@ -11,6 +11,7 @@ import {normalizePhone,smsConfigured,sendPhoneCode} from './phone-verification.j
 import {registerProductFeatures} from './product-features.js';
 import {registerOperations} from './operations.js';
 import {registerNotifications} from './notifications.js';
+import {registerCommerce} from './commerce.js';
 import {registerReportEmail} from './report-email.js';
 import {legalDocuments, validateLegalAcceptance} from './legal-documents.js';
 import {verifyGoogleCredential} from './google-login.js';
@@ -258,7 +259,7 @@ app.use(['/api/register','/api/login','/api/verify-email','/api/resend-code','/a
 app.use(['/api/password-reset/request','/api/password-reset/confirm'],authLimit);
 const writeAttempts=new Map();
 setInterval(()=>{const now=Date.now();for(const [key,entry] of attempts)if(now>entry.reset)attempts.delete(key);for(const [key,entry] of writeAttempts)if(now>entry.reset)writeAttempts.delete(key);},60000).unref();
-app.use(['/api/reports','/api/listings','/api/conversations','/api/me/avatar','/api/photos/check'],(req,res,next)=>{
+app.use(['/api/reports','/api/listings','/api/conversations','/api/me/avatar','/api/photos/check','/api/commerce'],(req,res,next)=>{
  if(['GET','HEAD','OPTIONS'].includes(req.method))return next();
  const user=currentUser(req),key=user?'user:'+user.id:'ip:'+req.ip;
  const now=Date.now();let entry=writeAttempts.get(key);if(!entry||now>entry.reset)entry={count:0,reset:now+60000};
@@ -343,6 +344,7 @@ const reportEmails=registerReportEmail({db,sendMail:async(email,subject,text)=>{
 registerProductFeatures({app,db,requireUser,requireAdmin,fail,hash,randomCode,universities,uploadDir,reportEmails,searchExpression:value=>listingSearch.expression(searchWords(value),closeWord),emailAvailable:emailVerificationAvailable,testEmailCodes,sendMail:async(email,subject,text)=>{if(testEmailCodes)return;if(brevoConfigured())return sendBrevoTextEmail(email,subject,text);if(mailer)return mailer.sendMail({from:process.env.SMTP_FROM,to:email,subject,text});throw new Error('Email unavailable');}});
 registerOperations({app,db,requireAdmin,fail,dataDir,uploadDir});
 pushNotifications=registerNotifications({app,db,requireUser,fail,hash});
+registerCommerce({app,db,requireUser,fail});
 app.get('/api/me', (req, res) => {res.set('Cache-Control','no-store');res.json({ user: publicUser(currentUser(req)),emailVerificationAvailable:emailVerificationAvailable(),phoneVerificationAvailable:smsConfigured()||testPhoneCodes,contactVerificationRequired:phoneVerificationRequired(),emailVerificationRequired:!dev||phoneVerificationRequired(),googleClientId,legalVersion:legal?.version || null });});
 app.get('/legal/:document', (req,res)=>{
   const document=legal?.[req.params.document];
