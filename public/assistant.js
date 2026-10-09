@@ -16,7 +16,7 @@ addMessage('Merhaba! Üni Satış’ta ilan verme, fotoğraflar, mesajlar ve hes
 function close(){recognition?.abort();panel.hidden=true;launcher.setAttribute('aria-expanded','false');launcher.focus();}
 launcher.addEventListener('click',async()=>{
  if(!panel.hidden){close();return;}panel.hidden=false;launcher.setAttribute('aria-expanded','true');input.focus();
- if(!configured){configured=true;try{const res=await fetch('/api/assistant/config');if(res.ok&&(await res.json()).aiAvailable)root.querySelector('.assistant-mode').textContent='Soruların ve son sohbet mesajların yanıtlanmak için OpenAI’ye gönderilir.';}catch{}}
+ if(!configured){configured=true;try{const res=await fetch('/api/assistant/config');if(res.ok){const config=await res.json();if(config.aiAvailable)root.querySelector('.assistant-mode').textContent=config.provider==='gemini'?'Soruların ve son sohbet mesajların Google Gemini’ye gönderilir. Ücretsiz kullanımda Google bu içerikleri ürünlerini geliştirmek için kullanabilir. Kota dolarsa yardım bilgilerinden yanıt verilir.':'Soruların ve son sohbet mesajların yanıtlanmak için OpenAI’ye gönderilir.';}}catch{}}
 });
 root.querySelector('.assistant-close').addEventListener('click',close);
 root.addEventListener('keydown',event=>{if(event.key==='Escape'&&!panel.hidden)close();});

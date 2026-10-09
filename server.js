@@ -6,7 +6,7 @@ import multer from 'multer';
 import sharp from 'sharp';
 import {preparePhoto, MAX_PHOTO_BYTES} from './image-upload.js';
 import {prepareCheckedPhoto, checkPhoto, moderationEnabled} from './photo-moderation.js';
-import {answerAppQuestion} from './app-assistant.js';
+import {answerAppQuestion,assistantConfig} from './app-assistant.js';
 import {normalizePhone,smsConfigured,sendPhoneCode} from './phone-verification.js';
 import {registerProductFeatures} from './product-features.js';
 import {registerOperations} from './operations.js';
@@ -719,7 +719,7 @@ app.get('/api/sellers/:id/listings', (req, res) => {
   seller.avatarUrl=seller.avatar_filename?'/api/users/'+seller.id+'/avatar?v='+encodeURIComponent(seller.avatar_filename):null;delete seller.avatar_filename;const me=currentUser(req),favorites=me?new Set(db.prepare('SELECT listing_id FROM favorites WHERE user_id=?').all(me.id).map(r=>r.listing_id)):new Set();res.json({seller,listings:listings.map(l=>({...l,favorite:favorites.has(l.id)}))});
 });
 const upload = multer({ storage: multer.memoryStorage(), limits: { files: 6, fileSize: MAX_PHOTO_BYTES } });
-app.get('/api/assistant/config',(_req,res)=>res.set('Cache-Control','no-store').json({aiAvailable:!!process.env.OPENAI_API_KEY?.trim(),photoModerationEnabled:moderationEnabled()}));
+app.get('/api/assistant/config',(_req,res)=>res.set('Cache-Control','no-store').json({...assistantConfig(),photoModerationEnabled:moderationEnabled()}));
 const assistantAttempts=new Map();let assistantActive=0,assistantDay='',assistantDailyCount=0;
 setInterval(()=>{for(const [key,entry] of assistantAttempts)if(entry.reset<Date.now())assistantAttempts.delete(key);},60000).unref();
 app.post('/api/assistant',async(req,res)=>{
@@ -734,7 +734,7 @@ app.post('/api/assistant',async(req,res)=>{
  if(assistantActive>=4)return fail(res,503,'Asistan şu anda yoğun. Biraz sonra tekrar dene.');
  const day=new Date().toISOString().slice(0,10);if(day!==assistantDay){assistantDay=day;assistantDailyCount=0;}
  const useAI=assistantDailyCount<Math.max(0,Number(process.env.APP_ASSISTANT_DAILY_LIMIT||200));
- if(useAI&&process.env.OPENAI_API_KEY)assistantDailyCount++;
+ if(useAI&&assistantConfig().aiAvailable)assistantDailyCount++;
  assistantActive++;
  try{res.set('Cache-Control','no-store').json(await answerAppQuestion(message.trim(),{env:useAI?process.env:{},history}));}
  finally{assistantActive--;}
