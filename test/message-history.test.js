@@ -28,4 +28,23 @@ test('large conversations show newest messages, page older ones without gaps and
  await request('/api/conversations/1/messages',2,{body:'After clear'});
  const cleared=await request('/api/conversations/1/messages');assert.deepEqual(cleared.data.messages.map(row=>row.body),['After clear']);
  assert.equal((await request('/api/conversations/1/messages',2)).data.messages.length,200);
+ // Legacy listing-specific threads (including reversed buyer/seller roles)
+ // are read as one person history, without deleting the original records.
+ db.exec(`INSERT INTO listings(id,seller_id,kind,title,description,category,condition,price,university,campus) VALUES
+   (2,2,'sale','Second item','Used','Diğer','İyi',1000,'İstanbul Teknik Üniversitesi',''),
+   (3,1,'sale','Reverse item','Used','Diğer','İyi',1000,'İstanbul Teknik Üniversitesi',''),
+   (4,3,'sale','Unrelated item','Used','Diğer','İyi',1000,'İstanbul Teknik Üniversitesi','');
+   INSERT INTO conversations(id,listing_id,buyer_id,seller_id) VALUES(2,2,1,2),(3,3,2,1),(4,4,1,3);
+   INSERT INTO messages(conversation_id,sender_id,body) VALUES(2,2,'Legacy second thread'),(3,2,'Legacy reverse thread'),(4,3,'Other person');`);
+ const grouped=(await request('/api/conversations')).data.conversations;
+ const peer=grouped.filter(c=>c.other_id===2);assert.equal(peer.length,1);assert.equal(peer[0].id,1);assert.deepEqual([...peer[0].conversationIds].sort(),[1,2,3]);assert.equal(peer[0].unread_count,2);
+ const merged=(await request('/api/conversations/2/messages')).data.messages;
+ assert.deepEqual(merged.map(m=>m.body),['After clear','Legacy second thread','Legacy reverse thread']);
+ assert.equal((await request('/api/conversations/3/messages',3)).status,404);
+ assert.equal((await request('/api/conversations')).data.conversations.find(c=>c.other_id===2).unread_count,0);
+ const reused=await request('/api/listings/2/conversation',1,{});assert.equal(reused.status,200);assert.equal(reused.data.id,1);assert.equal(db.prepare('SELECT COUNT(*) n FROM conversations').get().n,4);
+ await request('/api/conversations/2/clear',1,{confirmation:true});
+ assert.equal((await request('/api/conversations/1/messages')).data.messages.length,0);
+ assert.equal((await request('/api/conversations/4/messages')).data.messages[0].body,'Other person');
+ assert.ok((await request('/api/conversations/3/messages',2)).data.messages.length>0);
 });

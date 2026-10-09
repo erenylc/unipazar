@@ -12,6 +12,7 @@ import {registerProductFeatures} from './product-features.js';
 import {registerOperations} from './operations.js';
 import {registerNotifications} from './notifications.js';
 import {registerCommerce} from './commerce.js';
+import {groupConversationRows,personThreadIds} from './person-conversations.js';
 import {registerReportEmail} from './report-email.js';
 import {legalDocuments, validateLegalAcceptance} from './legal-documents.js';
 import {verifyGoogleCredential} from './google-login.js';
@@ -862,23 +863,26 @@ app.post('/api/listings/:id/conversation', (req, res) => {
   if (!listing || listing.status !== 'active' || listing.kind !== 'sale') return fail(res,404,'Aktif ilan bulunamadı.');
   if (listing.seller_id === user.id) return fail(res,400,'Kendi ilanına mesaj gönderemezsin.');
   if (usersBlocked(user.id,listing.seller_id)) return fail(res,403,'Bu kullanıcıyla mesajlaşma kapalı.');
+  const existing=db.prepare(`SELECT c.* FROM conversations c LEFT JOIN listings l ON l.id=c.listing_id WHERE ((c.buyer_id=? AND c.seller_id=?) OR (c.buyer_id=? AND c.seller_id=?)) AND (c.listing_id IS NULL OR l.kind='sale') ORDER BY c.id LIMIT 1`).get(user.id,listing.seller_id,listing.seller_id,user.id);
+  if(existing)return res.json({id:existing.id,listingId:listing.id,title:listing.title});
   db.prepare('INSERT OR IGNORE INTO conversations(listing_id,buyer_id,seller_id) VALUES(?,?,?)').run(listing.id,user.id,listing.seller_id);
   const conversation = db.prepare('SELECT id FROM conversations WHERE listing_id=? AND buyer_id=?').get(listing.id,user.id);
-  res.json({ id: conversation.id });
+  res.json({ id: conversation.id,listingId:listing.id,title:listing.title });
 });
 app.get('/api/conversations', (req, res) => {
   const user = requireUser(req,res); if (!user) return;
   const rows = db.prepare(`SELECT c.id,c.listing_id,COALESCE(l.title,'Yönetim mesajı') AS title,l.status,u.id AS other_id,u.name AS other_name,u.university AS other_university,u.avatar_filename AS other_avatar,
     (SELECT CASE WHEN m.voice_filename IS NOT NULL THEN CASE WHEN m.body='' THEN '🎤 Sesli mesaj' ELSE '🎤 ' || m.body END WHEN m.photo_filename IS NOT NULL THEN CASE WHEN m.body='' THEN '📷 Fotoğraf' ELSE '📷 ' || m.body END ELSE m.body END FROM messages m WHERE m.conversation_id=c.id ORDER BY id DESC LIMIT 1) AS last_message,
     (SELECT created_at FROM messages m WHERE m.conversation_id=c.id ORDER BY id DESC LIMIT 1) AS last_at,
+    (SELECT id FROM messages m WHERE m.conversation_id=c.id ORDER BY id DESC LIMIT 1) AS last_message_id,
     (SELECT COUNT(*) FROM messages m WHERE m.conversation_id=c.id AND m.sender_id<>? AND m.read_at IS NULL) AS unread_count
     FROM conversations c LEFT JOIN listings l ON l.id=c.listing_id JOIN users u ON u.id=CASE WHEN c.buyer_id=? THEN c.seller_id ELSE c.buyer_id END
-     WHERE (c.buyer_id=? OR c.seller_id=?) AND (c.listing_id IS NULL OR l.kind='sale' OR ?=1 OR l.seller_id=?) ORDER BY COALESCE(last_at,c.created_at) DESC`).all(user.id,user.id,user.id,user.id,user.support_verified,user.id);
+     WHERE (c.buyer_id=? OR c.seller_id=?) AND (c.listing_id IS NULL OR l.kind='sale' OR ?=1 OR l.seller_id=?) ORDER BY COALESCE(last_at,c.created_at) DESC,last_message_id DESC,c.id DESC`).all(user.id,user.id,user.id,user.id,user.support_verified,user.id);
   const blockedByMe=db.prepare('SELECT 1 FROM blocked_users WHERE blocker_id=? AND blocked_id=?');
   const clearedRows=db.prepare('SELECT conversation_id,cleared_through FROM conversation_views WHERE user_id=?').all(user.id);
   const clearedMap=new Map(clearedRows.map(row=>[row.conversation_id,row.cleared_through]));
   for(const row of rows){const cleared=clearedMap.get(row.id);if(cleared){const latest=db.prepare('SELECT id FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT 1').get(row.id);if(!latest||latest.id<=cleared){row.last_message='';row.unread_count=0;}}}
-  res.json({ conversations:rows.map(row=>({...row,other_avatar_url:row.other_avatar?'/api/users/'+row.other_id+'/avatar?v='+encodeURIComponent(row.other_avatar):null,blockedByMe:!!blockedByMe.get(user.id,row.other_id),messagesClosed:usersBlocked(user.id,row.other_id)})) });
+  res.json({ conversations:groupConversationRows(rows).map(row=>({...row,other_avatar_url:row.other_avatar?'/api/users/'+row.other_id+'/avatar?v='+encodeURIComponent(row.other_avatar):null,blockedByMe:!!blockedByMe.get(user.id,row.other_id),messagesClosed:usersBlocked(user.id,row.other_id)})) });
 });
 app.get('/api/message-events', (req,res) => {
   const user=requireUser(req,res); if(!user)return;
@@ -904,12 +908,16 @@ app.get('/api/conversations/:id/messages', (req, res) => {
   if (!conversation || ![conversation.buyer_id,conversation.seller_id].includes(user.id)) return fail(res,404,'Konuşma bulunamadı.');
   const before=req.query.before===undefined?null:Number(req.query.before);
   if(before!==null&&(!Number.isSafeInteger(before)||before<1||typeof req.query.before!=='string'))return fail(res,400,'Geçersiz mesaj sayfası.');
-  const hasUnread=req.query.preview!=='1'&&db.prepare('SELECT 1 FROM messages WHERE conversation_id=? AND sender_id<>? AND read_at IS NULL LIMIT 1').get(conversation.id,user.id);
-  const readResult=hasUnread?db.prepare('UPDATE messages SET read_at=? WHERE conversation_id=? AND sender_id<>? AND read_at IS NULL').run(Date.now(),conversation.id,user.id):{changes:0};
+  const ids=personThreadIds(db,conversation,user);if(!ids.includes(conversation.id))return fail(res,404,'Konuşma bulunamadı.');
+  const threadIds=JSON.stringify(ids);
+  const hasUnread=req.query.preview!=='1'&&db.prepare('SELECT 1 FROM messages WHERE conversation_id IN (SELECT value FROM json_each(?)) AND sender_id<>? AND read_at IS NULL LIMIT 1').get(threadIds,user.id);
+  const readResult=hasUnread?db.prepare('UPDATE messages SET read_at=? WHERE conversation_id IN (SELECT value FROM json_each(?)) AND sender_id<>? AND read_at IS NULL').run(Date.now(),threadIds,user.id):{changes:0};
   if(readResult.changes)notifyConversation(conversation,user.id);
-  const cleared=db.prepare('SELECT cleared_through FROM conversation_views WHERE user_id=? AND conversation_id=?').get(user.id,conversation.id)?.cleared_through||0;
-  const args=before===null?[conversation.id,cleared]:[conversation.id,cleared,before];
-  const rows=db.prepare(`SELECT id,sender_id,body,created_at,photo_filename,voice_filename,read_at FROM messages WHERE conversation_id=? AND id>?${before===null?'':' AND id<?'} ORDER BY id DESC LIMIT 201`).all(...args);
+  const args=before===null?[user.id,threadIds]:[user.id,threadIds,before];
+  const rows=db.prepare(`SELECT m.id,m.sender_id,m.body,m.created_at,m.photo_filename,m.voice_filename,m.read_at,c.listing_id,l.title AS listing_title FROM messages m
+    JOIN conversations c ON c.id=m.conversation_id LEFT JOIN listings l ON l.id=c.listing_id
+    LEFT JOIN conversation_views v ON v.conversation_id=m.conversation_id AND v.user_id=?
+    WHERE m.conversation_id IN (SELECT value FROM json_each(?)) AND m.id>COALESCE(v.cleared_through,0)${before===null?'':' AND m.id<?'} ORDER BY m.id DESC LIMIT 201`).all(...args);
   const hasOlder=rows.length>200,messages=rows.slice(0,200).reverse();
   res.json({messages,page:{hasOlder,before:hasOlder?messages[0].id:null,viewBefore:before}});
 });
@@ -918,9 +926,12 @@ app.post('/api/conversations/:id/clear',(req,res)=>{
  const conversation=db.prepare('SELECT * FROM conversations WHERE id=?').get(req.params.id);
  if(!conversation||![conversation.buyer_id,conversation.seller_id].includes(user.id))return fail(res,404,'Konuşma bulunamadı.');
  if(req.body?.confirmation!==true)return fail(res,400,'Sohbeti temizlemeyi onayla.');
- const last=db.prepare('SELECT COALESCE(MAX(id),0) AS id FROM messages WHERE conversation_id=?').get(conversation.id).id;
- db.prepare('INSERT INTO conversation_views(user_id,conversation_id,cleared_through) VALUES(?,?,?) ON CONFLICT(user_id,conversation_id) DO UPDATE SET cleared_through=excluded.cleared_through').run(user.id,conversation.id,last);
- db.prepare('UPDATE messages SET read_at=? WHERE conversation_id=? AND sender_id<>? AND read_at IS NULL AND id<=?').run(Date.now(),conversation.id,user.id,last);
+ const ids=personThreadIds(db,conversation,user);if(!ids.includes(conversation.id))return fail(res,404,'Konuşma bulunamadı.');
+ transaction(()=>{for(const id of ids){
+ const last=db.prepare('SELECT COALESCE(MAX(id),0) AS id FROM messages WHERE conversation_id=?').get(id).id;
+ db.prepare('INSERT INTO conversation_views(user_id,conversation_id,cleared_through) VALUES(?,?,?) ON CONFLICT(user_id,conversation_id) DO UPDATE SET cleared_through=excluded.cleared_through').run(user.id,id,last);
+ db.prepare('UPDATE messages SET read_at=? WHERE conversation_id=? AND sender_id<>? AND read_at IS NULL AND id<=?').run(Date.now(),id,user.id,last);
+ }});
  res.json({ok:true});
 });
 app.post('/api/conversations/:id/messages', (req,res,next)=>{

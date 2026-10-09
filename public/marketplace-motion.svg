@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 580 390" role="img" aria-label="Üniversiteler arasında hareket eden kitap ve paket">
+ <style>
+  .parcel{animation:travel 5s ease-in-out infinite;transform-origin:290px 200px}.book{animation:book 4s ease-in-out infinite;transform-origin:140px 185px}.heart{animation:heart 2.2s ease-in-out infinite;transform-origin:450px 115px}.route{stroke-dasharray:9 12;animation:route 2s linear infinite}.orbit{animation:orbit 12s linear infinite;transform-origin:290px 195px}
+  @keyframes travel{0%,100%{transform:translate(-82px,12px) rotate(-12deg)}50%{transform:translate(106px,-34px) rotate(12deg)}}@keyframes book{0%,100%{transform:translate(0,18px) rotate(-9deg)}50%{transform:translate(22px,-22px) rotate(8deg)}}@keyframes heart{0%,100%{transform:translate(0,14px) scale(.9)}50%{transform:translate(-18px,-12px) scale(1.13)}}@keyframes route{to{stroke-dashoffset:-42}}@keyframes orbit{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){.parcel,.book,.heart,.route,.orbit{animation:none}}
+ </style>
+ <circle cx="300" cy="198" r="158" fill="#a89ade" opacity=".2"/><circle cx="468" cy="72" r="58" fill="#ffd6b2"/><circle cx="101" cy="307" r="64" fill="#badacf"/>
+ <g class="orbit" fill="#dbcffa"><circle cx="286" cy="34" r="6"/><circle cx="452" cy="247" r="8"/><circle cx="146" cy="101" r="5"/></g>
+ <path class="route" d="M94 250C165 89 372 62 495 246" fill="none" stroke="#d8caff" stroke-width="4"/>
+ <g fill="#f9f7ff" stroke="#a799d5" stroke-width="3"><path d="M42 287h105v58H42zM31 287l64-36 63 36Z"/><path d="M61 299v33m34-33v33m34-33v33"/><path d="M438 287h105v58H438zM427 287l64-36 63 36Z"/><path d="M457 299v33m34-33v33m34-33v33"/></g>
+ <g class="book"><rect x="98" y="115" width="104" height="134" rx="13" fill="#fdfbf8"/><rect x="104" y="121" width="92" height="119" rx="8" fill="#8d7dc2"/><path d="M126 150h48m-48 17h36m-36 17h43" fill="none" stroke="#e9e2ff" stroke-width="5" stroke-linecap="round"/><path d="M113 121v119" stroke="#c5b6ee" stroke-width="5"/></g>
+ <g class="parcel"><rect x="247" y="160" width="108" height="103" rx="10" fill="#ec967c"/><path d="m247 160 25-32h60l23 32" fill="#ffd2a7"/><path d="M298 131v129" stroke="#ffe6c9" stroke-width="14"/><path d="M263 188h20" stroke="#a65c61" stroke-width="4" stroke-linecap="round"/><rect x="266" y="215" width="24" height="17" rx="3" fill="#fff3df"/></g>
+ <g class="heart"><circle cx="450" cy="115" r="33" fill="#fff8ec"/><path d="M450 132c-7-7-20-14-20-24 0-12 14-17 20-7 6-10 20-5 20 7 0 10-13 17-20 24Z" fill="#df778a"/></g>
+ <g fill="none" stroke="#d8cff1" stroke-width="4" stroke-linecap="round"><path d="M210 306h47m-10-10 10 10-10 10M368 86h-47m10-10-10 10 10 10"/></g>
+</svg>
