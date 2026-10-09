@@ -35,6 +35,7 @@ const dev = localMode || process.env.NODE_ENV !== 'production';
 const testEmailCodes = process.env.NODE_ENV === 'test' && process.env.TEST_EMAIL_CODES === '1';
 const testPhoneCodes=process.env.NODE_ENV==='test'&&process.env.TEST_PHONE_CODES==='1';
 const phoneVerificationRequired=()=>smsConfigured()||process.env.REQUIRE_CONTACT_VERIFICATION==='1';
+const sellerPhoneVerificationRequired=()=>!dev||phoneVerificationRequired()||process.env.REQUIRE_SELLER_PHONE_VERIFICATION==='1';
 const port = Number(process.env.PORT || 3000);
 const universities = JSON.parse(fs.readFileSync(path.join(root, 'universities.json'), 'utf8'));
 const universityNames = new Set(universities);
@@ -345,8 +346,8 @@ const reportEmails=registerReportEmail({db,sendMail:async(email,subject,text)=>{
 registerProductFeatures({app,db,requireUser,requireAdmin,fail,hash,randomCode,universities,uploadDir,reportEmails,searchExpression:value=>listingSearch.expression(searchWords(value),closeWord),emailAvailable:emailVerificationAvailable,testEmailCodes,sendMail:async(email,subject,text)=>{if(testEmailCodes)return;if(brevoConfigured())return sendBrevoTextEmail(email,subject,text);if(mailer)return mailer.sendMail({from:process.env.SMTP_FROM,to:email,subject,text});throw new Error('Email unavailable');}});
 registerOperations({app,db,requireAdmin,fail,dataDir,uploadDir});
 pushNotifications=registerNotifications({app,db,requireUser,fail,hash});
-registerCommerce({app,db,requireUser,fail});
-app.get('/api/me', (req, res) => {res.set('Cache-Control','no-store');res.json({ user: publicUser(currentUser(req)),emailVerificationAvailable:emailVerificationAvailable(),phoneVerificationAvailable:smsConfigured()||testPhoneCodes,contactVerificationRequired:phoneVerificationRequired(),emailVerificationRequired:!dev||phoneVerificationRequired(),googleClientId,legalVersion:legal?.version || null });});
+registerCommerce({app,db,requireUser,fail,requireVerifiedSeller:sellerPhoneVerificationRequired});
+app.get('/api/me', (req, res) => {res.set('Cache-Control','no-store');res.json({ user: publicUser(currentUser(req)),emailVerificationAvailable:emailVerificationAvailable(),phoneVerificationAvailable:smsConfigured()||testPhoneCodes,contactVerificationRequired:phoneVerificationRequired(),sellerPhoneVerificationRequired:sellerPhoneVerificationRequired(),emailVerificationRequired:!dev||phoneVerificationRequired(),googleClientId,legalVersion:legal?.version || null });});
 app.get('/legal/:document', (req,res)=>{
   const document=legal?.[req.params.document];
   if(!document || !['privacy','terms'].includes(req.params.document))return res.status(404).send('Metin henüz yayımlanmadı.');
@@ -763,6 +764,7 @@ app.get('/api/users/:id/avatar',(req,res)=>{
 const voiceType = buffer => buffer.subarray(0,4).equals(Buffer.from([0x1a,0x45,0xdf,0xa3])) ? 'webm' : buffer.subarray(0,4).toString() === 'OggS' ? 'ogg' : buffer.length >= 12 && buffer.subarray(4,8).toString() === 'ftyp' ? 'mp4' : null;
 app.post('/api/listings', (req,res,next)=>{
   const user=requireUser(req,res);if(!user)return;
+  if(sellerPhoneVerificationRequired()&&!user.phone_verified)return res.status(403).json({error:'İlan yayımlamak için telefonunu SMS koduyla doğrula. SMS hizmeti etkin değilse ilan yayımlanamaz.',verificationRequired:'phone'});
   if(!user.phone)return res.status(400).json({error:'İlan vermek için telefon numaranı eklemelisin.',fields:{phone:'Telefon numaranı ekle.'}});
   next();
 }, upload.array('photos',6), async (req, res) => {
@@ -775,6 +777,7 @@ app.post('/api/listings', (req,res,next)=>{
   let photos;
   try { photos = []; for(const file of req.files) photos.push(await prepareCheckedPhoto(file)); }
   catch(error){ return fail(res,error.status||400,error.message); }
+  if(sellerPhoneVerificationRequired()&&!db.prepare('SELECT phone_verified FROM users WHERE id=?').get(user.id)?.phone_verified)return res.status(403).json({error:'Telefon doğrulaman değişti. İlanı yayımlamadan önce SMS doğrulamasını tamamla.',verificationRequired:'phone'});
   const result = db.prepare('INSERT INTO listings(seller_id,kind,title,description,category,condition,price,university,campus) VALUES(?,?,?,?,?,?,?,?,?)').run(user.id,kind,title,description,category,condition,price,user.university,'');
   photos.forEach((photo,index) => {
     const filename = `${randomBytes(16).toString('hex')}.${photo.type}`;
@@ -793,6 +796,7 @@ app.patch('/api/listings/:id', (req,res,next)=>{
   const listing = db.prepare('SELECT * FROM listings WHERE id=?').get(req.params.id);
   if (!listing || (listing.seller_id !== user.id && user.role !== 'admin')) return fail(res,404,'İlan bulunamadı.');
   const status = clean(req.body.status,20);
+  if(listing.kind==='sale'&&status!=='removed'&&sellerPhoneVerificationRequired()&&!db.prepare('SELECT phone_verified FROM users WHERE id=?').get(listing.seller_id)?.phone_verified)return res.status(403).json({error:'Satış ilanını güncellemek veya satışa açmak için satıcının telefonu SMS koduyla doğrulanmalı.',verificationRequired:'phone'});
   if (listing.status === 'expired' && status && status !== 'removed') return fail(res,409,'Süresi dolan ilan yeniden yayına alınamaz. Yeni bir ilan oluştur.');
   if (status && !['active','reserved','sold','removed'].includes(status)) return fail(res,400,'Geçersiz durum.');
   const title = clean(req.body.title ?? listing.title,100), description = clean(req.body.description ?? listing.description,2000);
@@ -812,6 +816,7 @@ app.patch('/api/listings/:id', (req,res,next)=>{
   try { photos = []; for(const file of files) photos.push(await prepareCheckedPhoto(file)); }
   catch(error){ return fail(res,error.status||400,error.message); }
   const added=[];
+  if(listing.kind==='sale'&&status!=='removed'&&sellerPhoneVerificationRequired()&&!db.prepare('SELECT phone_verified FROM users WHERE id=?').get(listing.seller_id)?.phone_verified)return res.status(403).json({error:'Satıcının SMS doğrulaması tamamlanmalı.',verificationRequired:'phone'});
   try{
     photos.forEach(photo=>{const filename=`${randomBytes(16).toString('hex')}.${photo.type}`;fs.writeFileSync(path.join(uploadDir,filename),photo.buffer);added.push(filename);});
     transaction(()=>{

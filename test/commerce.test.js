@@ -7,10 +7,10 @@ import {registerCommerce} from '../commerce.js';
 test('checkout drafts keep prices authoritative, private and idempotent; cannot receive payment or reserve stock',async t=>{
   const db=new DatabaseSync(':memory:');
   db.exec(`PRAGMA foreign_keys=ON;
-    CREATE TABLE users(id INTEGER PRIMARY KEY,name TEXT,closed_at TEXT);
+    CREATE TABLE users(id INTEGER PRIMARY KEY,name TEXT,closed_at TEXT,phone_verified INTEGER DEFAULT 1);
     CREATE TABLE listings(id INTEGER PRIMARY KEY,seller_id INTEGER,kind TEXT,title TEXT,description TEXT,condition TEXT,price INTEGER,university TEXT,status TEXT);
     CREATE TABLE blocked_users(blocker_id INTEGER,blocked_id INTEGER);
-    INSERT INTO users VALUES(1,'Buyer',NULL),(2,'Seller',NULL),(3,'Other',NULL);
+    INSERT INTO users(id,name,closed_at) VALUES(1,'Buyer',NULL),(2,'Seller',NULL),(3,'Other',NULL);
     INSERT INTO listings VALUES(1,2,'sale','Book','Marked pages','Used',12000,'Other university','active'),(2,2,'donation','Gift','','Used',0,'Other university','active');`);
   const app=express();app.use(express.json());
   const fail=(res,code,error)=>res.status(code).json({error});
@@ -24,6 +24,7 @@ test('checkout drafts keep prices authoritative, private and idempotent; cannot 
   assert.equal((await call('/drafts','POST',{listingId:1,delivery:'shipping'},2)).status,400);
   assert.equal((await call('/drafts','POST',{listingId:2,delivery:'shipping'})).status,404);
   assert.equal((await call('/drafts','POST',{listingId:1,delivery:'fake'})).status,400);
+  db.exec('UPDATE users SET phone_verified=0 WHERE id=2');assert.equal((await call('/drafts','POST',{listingId:1,delivery:'shipping'})).status,403);db.exec('UPDATE users SET phone_verified=1 WHERE id=2');
   const first=await call('/drafts','POST',{listingId:1,delivery:'shipping',price:1,paid:true,total:1});
   assert.equal(first.status,201);assert.equal(first.data.draft.snapshot.price,12000);assert.equal(first.data.draft.snapshot.total,null);assert.equal(first.data.configuration.paymentAvailable,false);
   const second=await call('/drafts','POST',{listingId:1,delivery:'campus'});

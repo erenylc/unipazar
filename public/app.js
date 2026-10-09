@@ -1,3 +1,4 @@
+import {attachPhotoGestures} from './photo-gestures.js';
 import {chatIcons,avatarMarkup} from './chat-ui.js';
 import {optimizePhoto} from './photo-upload.js';
 import {createRefreshQueue} from './live-refresh.js';
@@ -29,6 +30,7 @@ applyTheme();
  const categories = ['Ders kitapları','Elektronik','Ev & yurt','Giyim','Bisiklet & spor','Diğer'];
 const icon = { home:'⌂', heart:'♡', plus:'＋', chat:'▤', user:'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M4.5 20c.4-4.2 3-6.3 7.5-6.3s7.1 2.1 7.5 6.3"/></svg>' };
 let toastTimer;
+let photoViewerCleanup=null;
 const responseCache=new Map();
 let cacheGeneration=0;
 function cacheLifetime(url){
@@ -185,7 +187,7 @@ function ownListingCard(item){
  return `<article class="card"><a class="card-image" href="#/listing/${item.id}">${item.cover?`<img src="/uploads/${encodeURIComponent(item.cover)}" alt="${escapeHtml(item.title)}" loading="lazy">`:'<div class="placeholder">Fotoğraf yok</div>'}<span class="badge ${free?'free':''}">${free?'Ücretsiz':'İkinci el'}</span></a><div class="card-body"><a href="#/listing/${item.id}"><h3>${escapeHtml(item.title)}</h3></a><div class="price">${free?'Ücretsiz':money(item.price)}</div><div class="meta">${escapeHtml(item.university)} · ${escapeHtml(item.condition)} · ${item.status==='active'?'Yayında':'Ayrıldı'}</div><button class="btn btn-outline" data-action="edit-listing" data-id="${item.id}" style="margin-top:12px">Düzenle</button></div></article>`;
 }
 function ensureSellingPhone(){
- const needed=[state.emailVerificationRequired&&!state.user.emailVerified?'e-posta':null,state.contactVerificationRequired&&!state.user.phoneVerified?'telefon':null].filter(Boolean);if(needed.length){pageFrame(`<main class="shell page narrow-page"><section class="panel"><h2>İletişim bilgilerini doğrula</h2><p>İlan verebilmek için ${needed.join(' ve ')} doğrulamasını tamamlaman gerekiyor.</p><a class="btn btn-primary" href="#/account">Hesabımdan doğrula</a></section></main>`,'/sell');return false;}
+ const needed=[state.emailVerificationRequired&&!state.user.emailVerified?'e-posta':null,(state.contactVerificationRequired||state.sellerPhoneVerificationRequired)&&!state.user.phoneVerified?'telefon':null].filter(Boolean);if(needed.length){pageFrame(`<main class="shell page narrow-page"><section class="panel"><h2>İletişim bilgilerini doğrula</h2><p>İlan verebilmek için ${needed.join(' ve ')} doğrulamasını tamamlaman gerekiyor.</p><a class="btn btn-primary" href="#/account">Hesabımdan doğrula</a></section></main>`,'/sell');return false;}
  if(state.user.phone)return true;
  pageFrame(`<main class="shell page narrow-page"><section class="panel"><h2>Telefon numaranı ekle</h2><p>İlan vermek için telefon bilgilerini tamamlaman gerekiyor.</p><div class="phone-required-actions"><button class="btn btn-primary" data-action="change-phone">Telefon numarası ekle</button><a class="btn btn-light" href="#/sell">Seçeneklere dön</a></div></section></main>`,'/sell');
  return false;
@@ -459,6 +461,7 @@ function universityPickerForm(){
  return `<div class="field"><label for="universityPickerSearch">Üniversite ara</label><input id="universityPickerSearch" placeholder="Üniversite adı yaz"></div><div class="university-options"><button class="university-option" data-action="select-university" data-university="*">Tüm üniversiteler</button>${state.universities.map((u,index)=>`<button class="university-option" data-action="select-university" data-university="${escapeHtml(u)}">${universityLogo(u,index<12)}<span>${escapeHtml(u)}</span></button>`).join('')}</div>`;
 }
 function drawModal(){
+ photoViewerCleanup?.();photoViewerCleanup=null;
  document.documentElement.classList.toggle('modal-open',!!state.modal);
  let html='';
  if(state.modal==='auth') html=authModal(state);
@@ -617,16 +620,14 @@ function renderListingPhotos(){
  $('#photoCount').textContent=`${selectedListingPhotos.length}/6 fotoğraf seçildi`;
 }
 function showPhotoViewer(src,title,editable=false,photos=null,index=0){
- showSimpleModal(title,'',`<div class="app-photo-viewer"><img src="${escapeHtml(src)}" alt="${escapeHtml(title)}">${editable?'<button type="button" class="photo-edit-link" data-action="profile-photo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m16 3 5 5-12 12-6 1 1-6L16 3ZM14 5l5 5"/></svg><span>Resmi düzenle</span></button>':''}</div>`);
- $('#modal-root .modal')?.classList.add('photo-viewer-modal');
- if(photos?.length>1){
-  const viewer=$('.app-photo-viewer'),image=viewer.querySelector('img');
-  image.insertAdjacentHTML('afterend','<button type="button" class="viewer-arrow viewer-prev" aria-label="Önceki fotoğraf">‹</button><button type="button" class="viewer-arrow viewer-next" aria-label="Sonraki fotoğraf">›</button><span class="viewer-counter" aria-live="polite"></span>');
-  let current=index;const move=delta=>{current=(current+delta+photos.length)%photos.length;image.src=photos[current].src;image.alt=photos[current].alt||title;viewer.querySelector('.viewer-counter').textContent=`${current+1} / ${photos.length}`;showDetailPhoto(current);if(!matchMedia('(prefers-reduced-motion: reduce)').matches)image.animate([{opacity:.4},{opacity:1}],{duration:140});};
-  viewer.querySelector('.viewer-prev').addEventListener('click',()=>move(-1));viewer.querySelector('.viewer-next').addEventListener('click',()=>move(1));move(0);
-  const modal=$('#modal-root .modal');modal.tabIndex=-1;modal.focus();modal.addEventListener('keydown',event=>{if(event.key==='ArrowLeft'){event.preventDefault();move(-1);}if(event.key==='ArrowRight'){event.preventDefault();move(1);}});
-  let start=null;image.draggable=false;image.style.touchAction='pan-y';image.addEventListener('pointerdown',event=>{if(event.button!==0)return;start={x:event.clientX,y:event.clientY};image.setPointerCapture(event.pointerId);});image.addEventListener('pointerup',event=>{if(!start)return;const dx=event.clientX-start.x,dy=event.clientY-start.y;start=null;if(Math.abs(dx)>45&&Math.abs(dx)>Math.abs(dy))move(dx<0?1:-1);});image.addEventListener('pointercancel',()=>start=null);
- }
+ showSimpleModal(title,'',`<div class="app-photo-viewer"><div class="photo-gesture-frame"><img src="${escapeHtml(src)}" alt="${escapeHtml(title)}"></div><div class="photo-zoom-tools"><button type="button" class="btn btn-outline" data-zoom="out" aria-label="Fotoğrafı küçült">−</button><button type="button" class="btn btn-outline" data-zoom="reset">Sığdır</button><button type="button" class="btn btn-outline" data-zoom="in" aria-label="Fotoğrafı büyüt">+</button></div><p class="photo-gesture-hint">Yakınlaştırmak için iki parmağını kullan.${photos?.length>1?' Fotoğraflar arasında sağa veya sola kaydır.':''}</p>${editable?'<button type="button" class="photo-edit-link" data-action="profile-photo">Resmi düzenle</button>':''}</div>`);
+ const modal=$('#modal-root .modal');modal.classList.add('photo-viewer-modal');
+ const viewer=$('.app-photo-viewer'),frame=viewer.querySelector('.photo-gesture-frame'),image=frame.querySelector('img');let current=index,gestures;
+ const move=delta=>{if(!photos?.length)return;current=(current+delta+photos.length)%photos.length;image.src=photos[current].src;image.alt=photos[current].alt||title;viewer.querySelector('.viewer-counter').textContent=`${current+1} / ${photos.length}`;gestures?.reset();showDetailPhoto(current);};
+ if(photos?.length>1){frame.insertAdjacentHTML('beforeend','<button type="button" class="viewer-arrow viewer-prev" aria-label="Önceki fotoğraf">‹</button><button type="button" class="viewer-arrow viewer-next" aria-label="Sonraki fotoğraf">›</button><span class="viewer-counter" aria-live="polite"></span>');viewer.querySelector('.viewer-prev').addEventListener('click',()=>move(-1));viewer.querySelector('.viewer-next').addEventListener('click',()=>move(1));move(0);}
+ gestures=attachPhotoGestures(frame,image,{onNavigate:delta=>{if(photos?.length>1)move(delta);}});photoViewerCleanup=()=>gestures.dispose();
+ viewer.querySelector('[data-zoom="in"]').addEventListener('click',()=>gestures.zoom(1.5));viewer.querySelector('[data-zoom="out"]').addEventListener('click',()=>gestures.zoom(1/1.5));viewer.querySelector('[data-zoom="reset"]').addEventListener('click',()=>gestures.reset());
+ modal.tabIndex=-1;modal.focus();modal.addEventListener('keydown',event=>{if(photos?.length>1&&['ArrowLeft','ArrowRight'].includes(event.key)){event.preventDefault();move(event.key==='ArrowLeft'?-1:1);}});
 }
 function showPhoneVerification(codeSent=false){
  if(!state.phoneVerificationAvailable){showSimpleModal('Telefon doğrulaması','SMS hizmeti henüz etkin değil. Numaran doğrulanmış sayılmıyor. Hizmet açıldığında buradan SMS koduyla doğrulayabileceksin.','');return;}
@@ -640,7 +641,7 @@ function renderEditPhotos(){
  $('#editPhotoCount').textContent=translateText(`${photos.length}/6 fotoğraf`,language);
  applyLocale(list,language);
 }
-function closeModal(){ stopCamera();clearEditPhotos();state.modal=null; $('#modal-root')?.remove();document.documentElement.classList.remove('modal-open'); }
+function closeModal(){ photoViewerCleanup?.();photoViewerCleanup=null;stopCamera();clearEditPhotos();state.modal=null; $('#modal-root')?.remove();document.documentElement.classList.remove('modal-open'); }
 let detailPhotos=[],detailPhotoIndex=0;
 function showDetailPhoto(index){
  if(!detailPhotos.length)return;
@@ -711,8 +712,8 @@ function showRouteLoading(path){
 async function render(){const path=route(),sequence=++navigationSequence;
  if(!state.user&&accountRoutes.has(path)){renderGuestArea(path);return;}
  const loadingTimer=setTimeout(()=>{if(sequence===navigationSequence&&route()===path)showRouteLoading(path);},120);
- try { const path=route(); if(path==='/') await renderBrowse(); else if(path==='/donation') await renderBrowse(true); else if(path.startsWith('/listing/')) {await renderDetail(path.split('/')[2]);decorateDetail();} else if(path.startsWith('/seller/')) await renderSeller(path.split('/')[2]); else if(path==='/sell') renderSellChoice(); else if(path==='/sell-sale') {renderSell();restoreDraft();} else if(path==='/sell-donation') {renderSell('donation');restoreDraft();} else if(path==='/orders') await (await import('./commerce.js')).renderOrders(); else if(path==='/favorites') await renderFavorites(); else if(path.startsWith('/admin-messages/'))await renderAdminMessages(path.split('/')[2],path.split('/')[3]);else if(path.startsWith('/admin-message/')){if(state.user?.role!=='admin'){go('/');return;}state.selectedConversation=Number(path.split('/')[2]);await renderMessages();}else if(path==='/messages') await renderMessages(); else if(path==='/mine') await renderListingsDashboard(); else if(path==='/manage') await renderManage(); else if(path==='/account'){await loadUniversities();renderAccount();} else if(path==='/support') await renderSupport(); else if(path==='/admin') await renderAdmin(); else go('/'); } catch(error){ if(sequence===navigationSequence){toast(error.message);pageFrame(`<main class="shell page">${empty('Sayfa yüklenemedi',error.message)}</main>`,'/');} } finally {clearTimeout(loadingTimer);} }
-async function refreshUser(){const result=await api('/api/me');state.user=result.user;if(state.user?.avatarUrl){const photo=new Image();photo.src=state.user.avatarUrl;}state.emailVerificationAvailable=result.emailVerificationAvailable;state.phoneVerificationAvailable=!!result.phoneVerificationAvailable;state.contactVerificationRequired=!!result.contactVerificationRequired;state.emailVerificationRequired=!!result.emailVerificationRequired;state.googleClientId=result.googleClientId||'';state.legalVersion=result.legalVersion||null;connectMessageStream();if(!state.user)warmGoogleSignIn().catch(()=>{});}
+ try { const path=route(); if(path==='/') await renderBrowse(); else if(path==='/donation') await renderBrowse(true); else if(path.startsWith('/listing/')) {await renderDetail(path.split('/')[2]);decorateDetail();} else if(path.startsWith('/seller/')) await renderSeller(path.split('/')[2]); else if(path==='/sell') renderSellChoice(); else if(path==='/sell-sale') {renderSell();restoreDraft();} else if(path==='/sell-donation') {renderSell('donation');restoreDraft();} else if(path.startsWith('/checkout/')) await (await import('./commerce.js')).renderCheckout(path.split('/')[2]); else if(path==='/orders') await (await import('./commerce.js')).renderOrders(); else if(path==='/favorites') await renderFavorites(); else if(path.startsWith('/admin-messages/'))await renderAdminMessages(path.split('/')[2],path.split('/')[3]);else if(path.startsWith('/admin-message/')){if(state.user?.role!=='admin'){go('/');return;}state.selectedConversation=Number(path.split('/')[2]);await renderMessages();}else if(path==='/messages') await renderMessages(); else if(path==='/mine') await renderListingsDashboard(); else if(path==='/manage') await renderManage(); else if(path==='/account'){await loadUniversities();renderAccount();} else if(path==='/support') await renderSupport(); else if(path==='/admin') await renderAdmin(); else go('/'); } catch(error){ if(sequence===navigationSequence){toast(error.message);pageFrame(`<main class="shell page">${empty('Sayfa yüklenemedi',error.message)}</main>`,'/');} } finally {clearTimeout(loadingTimer);} }
+async function refreshUser(){const result=await api('/api/me');state.user=result.user;if(state.user?.avatarUrl){const photo=new Image();photo.src=state.user.avatarUrl;}state.emailVerificationAvailable=result.emailVerificationAvailable;state.phoneVerificationAvailable=!!result.phoneVerificationAvailable;state.contactVerificationRequired=!!result.contactVerificationRequired;state.sellerPhoneVerificationRequired=!!result.sellerPhoneVerificationRequired;state.emailVerificationRequired=!!result.emailVerificationRequired;state.googleClientId=result.googleClientId||'';state.legalVersion=result.legalVersion||null;connectMessageStream();if(!state.user)warmGoogleSignIn().catch(()=>{});}
 async function refreshUnread(){
   state.unreadCount=state.user?(await api('/api/unread-count')).count:0;
   document.querySelectorAll('.message-count').forEach(badge=>{badge.hidden=state.unreadCount===0;badge.textContent=state.unreadCount>99?'99+':String(state.unreadCount);});
