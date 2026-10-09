@@ -5,6 +5,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {mkdtempSync,rmSync} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import {createHash} from 'node:crypto';
 test('feed cursors return all public items without duplicates and preserve privacy and sort order',async t=>{
  const temp=mkdtempSync(path.join(os.tmpdir(),'unisatis-pages-')),port=35500+Math.floor(Math.random()*1000),base=`http://127.0.0.1:${port}`;
  const server=spawn(process.execPath,['server.js','--local'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),NODE_ENV:'test',DATA_DIR:path.join(temp,'data'),UPLOAD_DIR:path.join(temp,'uploads'),BACKUP_ENABLED:'0'},stdio:'ignore'});let db;
@@ -22,4 +23,11 @@ test('feed cursors return all public items without duplicates and preserve priva
  }
  assert.equal((await fetch(base+'/api/listings?after=invalid')).status,400);
  assert.equal((await fetch(base+'/api/listings?limit=0')).status,400);
+ db.prepare('INSERT INTO sessions VALUES(?,?,?)').run(createHash('sha256').update('campus-preview').digest('hex'),1,Date.now()+600000);
+ db.exec("INSERT INTO users(id,name,email,password_hash,university,campus) VALUES(2,'Other campus seller','other@example.invalid','unused','Munzur Üniversitesi',''); INSERT INTO listings(id,seller_id,kind,title,description,category,condition,price,university,campus) VALUES(200,2,'sale','Other university book','Clean','Ders kitapları','İyi',10000,'Munzur Üniversitesi',''),(201,2,'donation','Private gift','Clean','Ders kitapları','İyi',0,'Munzur Üniversitesi','');");
+ const headers={cookie:'up_session=campus-preview'};
+ const all=(await (await fetch(base+'/api/listings?kind=sale',{headers})).json()).listings;
+ assert.ok(all.some(row=>row.university==='Munzur Üniversitesi'));assert.ok(all.some(row=>row.university==='İstanbul Teknik Üniversitesi'));assert.ok(!all.some(row=>row.kind==='donation'));
+ const campus=(await (await fetch(base+'/api/listings?kind=sale&university='+encodeURIComponent('Munzur Üniversitesi'),{headers})).json()).listings;
+ assert.deepEqual(campus.map(row=>row.id),[200]);
 });
