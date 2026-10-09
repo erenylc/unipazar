@@ -4,6 +4,8 @@ import express from 'express';
 import {DatabaseSync} from 'node:sqlite';
 import {createHash,randomBytes} from 'node:crypto';
 import webpush from 'web-push';
+import {readFileSync} from 'node:fs';
+import {runInNewContext} from 'node:vm';
 import {registerNotifications,validSubscription} from '../notifications.js';
 import {registerReportEmail} from '../report-email.js';
 const hash=value=>createHash('sha256').update(value).digest('hex');
@@ -16,6 +18,27 @@ test('push subscriptions reject internal URLs and deliver private-safe messages 
  assert.equal(validSubscription(subscription),true);assert.equal(validSubscription({...subscription,endpoint:'http://127.0.0.1/internal'}),false);assert.equal((await request('/api/notifications/status','GET',null,null)).status,401);const status=await request('/api/notifications/status');assert.ok(status.data.publicKey);assert.equal(status.data.privateKey,undefined);
  assert.equal((await request('/api/notifications/subscribe','POST',subscription)).status,200);db.prepare('INSERT INTO messages VALUES(1,1,1,?)').run('PRIVATE MESSAGE CONTENT');await service.notify({id:1,buyer_id:2,seller_id:1},1);assert.equal(deliveries.length,0);assert.equal(db.prepare('SELECT count(*) AS n FROM push_queue').get().n,1);db.prepare('UPDATE push_queue SET next_attempt=0').run();await service.flush();assert.equal(deliveries.length,1);assert.equal(deliveries[0].payload.userId,2);assert.ok(!JSON.stringify(deliveries[0].payload).includes('PRIVATE MESSAGE'));await service.notify({id:1,buyer_id:2,seller_id:1},1);assert.equal(deliveries.length,1);
  db.prepare('DELETE FROM sessions WHERE user_id=2').run();assert.equal(db.prepare('SELECT count(*) AS n FROM push_subscriptions').get().n,0);db.prepare('INSERT INTO messages VALUES(2,1,1,?)').run('another private message');await service.notify({id:1,buyer_id:2,seller_id:1},1);assert.equal(deliveries.length,1);
+ db.prepare('INSERT INTO sessions VALUES(?,?,?)').run(hash('session2'),2,Date.now()+100000);
+ assert.equal((await request('/api/notifications/subscribe','POST',subscription)).status,200);
+ db.prepare('INSERT INTO messages VALUES(3,1,1,?)').run('after signing back in');await service.notify({id:1,buyer_id:2,seller_id:1},1);assert.equal(deliveries.length,2);
+ const other={...subscription,endpoint:subscription.endpoint+'-other'};assert.equal((await request('/api/notifications/subscribe','POST',other,1)).status,200);
+ db.prepare('INSERT INTO sessions VALUES(?,?,?)').run(hash('expired-devices'),2,Date.now()+100000);
+ for(let i=0;i<9;i++)db.prepare('INSERT INTO push_subscriptions(endpoint,user_id,session_hash,subscription) VALUES(?,?,?,?)').run(subscription.endpoint+'-'+i,2,hash('expired-devices'),JSON.stringify(subscription));
+ assert.equal((await request('/api/notifications/subscribe','POST',other)).status,400);
+ assert.equal((await request('/api/notifications/subscribe','POST',subscription)).status,200);
+ db.prepare('UPDATE sessions SET expires_at=? WHERE token_hash=?').run(Date.now()-60000,hash('expired-devices'));
+ assert.equal((await request('/api/notifications/subscribe','POST',{...subscription,endpoint:subscription.endpoint+'-new'})).status,200);
+ assert.equal(db.prepare('SELECT count(*) AS n FROM push_subscriptions WHERE user_id=2').get().n,2);
+});
+test('an existing permitted browser subscription reconnects after logout and login without requesting permission',async()=>{
+ const state={user:{id:2}},posts=[],listeners=new Map();let permissionRequests=0;
+ const context={state,api:async(path,options)=>{if(options?.method==='POST')posts.push(options.body);return {latest:null};},go(){},render(){},toast(){},localStorage:{getItem:()=>null},window:{Notification:{}},Notification:{permission:'granted',requestPermission(){permissionRequests++;}},navigator:{serviceWorker:{addEventListener(){},getRegistration:async()=>({pushManager:{getSubscription:async()=>({toJSON:()=>({endpoint:'existing-device'})})}})}},document:{addEventListener:(event,fn)=>listeners.set(event,fn),querySelector:()=>null},location:{search:'',hash:'#/'},URLSearchParams,setInterval(){},setTimeout(){}};
+ const source=readFileSync(new URL('../public/notifications-client.js',import.meta.url),'utf8').replace(/^import .*\n/,'');
+ runInNewContext(source+'\nglobalThis.checkNotifications=check;',context);
+ await new Promise(resolve=>setImmediate(resolve));assert.equal(posts.length,1);
+ await context.checkNotifications();assert.equal(posts.length,1);
+ state.user=null;await context.checkNotifications();state.user={id:2};await context.checkNotifications();assert.equal(posts.length,2);assert.equal(permissionRequests,0);
+ state.user=null;await context.checkNotifications();context.Notification.permission='default';state.user={id:1};await context.checkNotifications();assert.equal(posts.length,2);
 });
 test('report emails persist, retry and exclude the original complaint text',async()=>{
  const db=new DatabaseSync(':memory:');db.exec(`CREATE TABLE users(id INTEGER PRIMARY KEY,email TEXT,email_verified INTEGER,closed_at TEXT);CREATE TABLE reports(id INTEGER PRIMARY KEY,reporter_id INTEGER,reason TEXT);CREATE TABLE report_events(id INTEGER PRIMARY KEY,report_id INTEGER,status TEXT,note TEXT);INSERT INTO users VALUES(1,'reporter@example.test',1,NULL);INSERT INTO reports VALUES(1,1,'PRIVATE COMPLAINT');INSERT INTO report_events VALUES(1,1,'closed','İnceleme tamamlandı.');`);let attempts=0,mail;
