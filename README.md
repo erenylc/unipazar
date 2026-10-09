@@ -115,3 +115,9 @@ npm run check
 npm test
 npm audit --audit-level=high
 ```
+
+## Kalıcı oturum ve mesaj görünümü
+
+Giriş çerezi HttpOnly, SameSite=Strict ve üretimde Secure ile 180 günlük kalıcı oturumdur. Etkin oturumlar `/api/me` üzerinden günde en fazla bir kez yenilenir. Süresi dolan veya iptal edilen oturumlar tekrar açılmaz; çıkış, şifre sıfırlama ve hesap kapatma geçerlidir. Tema ilk kullanımda açık, sonraki açılışlarda cihazdaki son tercihtir.
+
+Sohbet görselleri yalnızca o hesaba ait bellek önbelleğinde tutulur (en fazla 24 görsel / 32 MB, en fazla üç eşzamanlı indirme); oturum değişince dosya URL’leri iptal edilir. Kalıcı tarayıcı veya herkese açık medya önbelleği eklenmez. Sesli mesajlar yerel oynat/duraklat, dalga görünümü, ilerleme ve hız kontrolleriyle gösterilir; görünmeyen konuşmaların sesleri durdurulur. Gönderme sesi başarılı mesaj kaydından sonra çalar ve mevcut ses tercihiyle kapatılabilir.

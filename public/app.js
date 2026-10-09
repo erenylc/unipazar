@@ -1,3 +1,4 @@
+import {syncMessageMedia,messagePhotoURL,clearMessageMedia} from './message-media.js';
 import {attachPhotoGestures} from './photo-gestures.js';
 import {chatIcons,avatarMarkup} from './chat-ui.js';
 import {optimizePhoto} from './photo-upload.js';
@@ -27,7 +28,7 @@ function applyTheme(){
  document.querySelector('meta[name="theme-color"]')?.setAttribute('content',theme==='dark'?'#1e1e2e':'#f6f6f1');
 }
 applyTheme();
- const categories = ['Ders kitapları','Elektronik','Ev & yurt','Giyim','Bisiklet & spor','Diğer'];
+ const categories = ['Ders kitapları','Elektronik','Ev & yurt','Giyim','Spor','Diğer'];
 const icon = { home:'⌂', heart:'♡', plus:'＋', chat:'▤', user:'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M4.5 20c.4-4.2 3-6.3 7.5-6.3s7.1 2.1 7.5 6.3"/></svg>' };
 let toastTimer;
 let photoViewerCleanup=null;
@@ -103,6 +104,7 @@ function pageFrame(content,active){
  const art={'/favorites':'favorites','/mine':'listings','/manage':'listings','/sell':'listings','/account':'account','/support':'support','/admin':'account'}[active];
  if(art)content=content.replace(/<div class="section-head"><div><h2>([\s\S]*?)<\/h2><p>([\s\S]*?)<\/p><\/div><\/div>/,
   (_match,title,subtitle)=>`<section class="page-intro page-intro-${art}"><div><span class="page-intro-kicker">ÜNİ SATIŞ</span><h2>${title}</h2><p>${subtitle}</p></div><img src="/${art}-illustration.svg" alt="" aria-hidden="true"></section>`);
+ if(active!=='/messages')syncMessageMedia(null,state.user?.id??null);
  $('#app').innerHTML=navbar(active)+content+footer();
  applyLocale($('#app'),language);
  document.dispatchEvent(new Event('unisatis-render'));
@@ -292,7 +294,7 @@ function warmUniversityLogos(){
 document.addEventListener('pointerover',event=>{if(event.target.closest('.campus-picker')){loadUniversities().catch(()=>{});warmUniversityLogos();}});
 function universityLogo(name,eager=false){return universityLogos[name]?`<img class="university-logo" src="${universityLogos[name]}" alt="${escapeHtml(name)} logosu" width="30" height="30" loading="${eager?'eager':'lazy'}" decoding="async">`:'';}
 const universityLogosReady=fetch('/university-logos.json').then(r=>r.json()).then(logos=>{universityLogos=logos;warmUniversityLogos();document.querySelectorAll('[data-university-logo]').forEach(el=>el.innerHTML=universityLogo(el.dataset.universityLogo));const picker=$('.campus-picker');if(picker&&!picker.querySelector('.university-logo'))picker.querySelector('span')?.insertAdjacentHTML('afterend',universityLogo(state.filters.university,true));}).catch(()=>{});
-function conversationPanel(selected,messages){return `<div class="chat-box"><div class="chat-header">${avatarMarkup(selected.other_name,selected.other_avatar_url)}<span class="chat-person"><a class="chat-person-link" href="#/seller/${selected.other_id}">${escapeHtml(selected.other_name)}</a><small>${escapeHtml(selected.other_university)} · ${selected.listing_id?`<a href="#/listing/${selected.listing_id}">${escapeHtml(selected.title)}</a>`:escapeHtml(selected.title)}</small></span></div><div class="messages">${messages.length?messages.map(m=>`<div data-message-id="${m.id}" class="bubble ${m.sender_id===state.user.id?'mine':''}">${m.photo_filename?`<button type="button" class="chat-photo-open" data-action="view-chat-photo" data-id="${m.id}" aria-label="Fotoğrafı aç"><img class="chat-photo" src="/api/messages/${m.id}/photo" alt="Gönderilen fotoğraf" loading="lazy"></button>`:''}${m.body?`<span>${escapeHtml(localizedMessageText(m.body))}</span>`:''}<small>${chatTime(m.created_at)} ${m.sender_id===state.user.id?`<span class="message-ticks ${m.read_at?'read':''}" title="${m.read_at?'Okundu':'Gönderildi · henüz okunmadı'}" aria-label="${m.read_at?'Okundu':'Gönderildi · henüz okunmadı'}">${chatIcons.check}</span>`:''}</small>${m.sender_id===state.user.id?`<details class="message-menu"><summary aria-label="Mesaj seçenekleri">${chatIcons.down}</summary><div>${m.body?`<button data-action="edit-message" data-id="${m.id}" data-body="${escapeHtml(m.body)}">Düzenle</button>`:''}<button data-action="delete-message" data-id="${m.id}">Sil</button></div></details>`:''}</div>`).join(''):'<p class="muted small">İlk mesajı yaz.</p>'}</div><form class="chat-compose" data-form="message" enctype="multipart/form-data"><button type="button" class="chat-attach chat-camera" data-action="photo-menu" title="Fotoğraf çek veya galeriden seç" aria-label="Fotoğraf çek veya galeriden seç"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h4l2-2h6l2 2h4v12H3z"/><circle cx="12" cy="13" r="3"/></svg></button><div class="chat-write"><input name="body" placeholder="Özel mesaj yaz..." maxlength="2000" aria-label="Mesaj"><span id="chatPhotoStatus" class="chat-photo-status" hidden></span></div><button class="btn btn-primary">Gönder</button></form></div>`;}
+function conversationPanel(selected,messages){return `<div class="chat-box"><div class="chat-header">${avatarMarkup(selected.other_name,selected.other_avatar_url)}<span class="chat-person"><a class="chat-person-link" href="#/seller/${selected.other_id}">${escapeHtml(selected.other_name)}</a><small>${escapeHtml(selected.other_university)} · ${selected.listing_id?`<a href="#/listing/${selected.listing_id}">${escapeHtml(selected.title)}</a>`:escapeHtml(selected.title)}</small></span></div><div class="messages">${messages.length?messages.map(m=>`<div data-message-id="${m.id}" class="bubble ${m.sender_id===state.user.id?'mine':''}">${m.photo_filename?`<button type="button" class="chat-photo-open" data-action="view-chat-photo" data-id="${m.id}" aria-label="Fotoğrafı aç"><img class="chat-photo" data-message-photo="${m.id}" alt="Gönderilen fotoğraf" decoding="async"></button>`:''}${m.body?`<span>${escapeHtml(localizedMessageText(m.body))}</span>`:''}<small>${chatTime(m.created_at)} ${m.sender_id===state.user.id?`<span class="message-ticks ${m.read_at?'read':''}" title="${m.read_at?'Okundu':'Gönderildi · henüz okunmadı'}" aria-label="${m.read_at?'Okundu':'Gönderildi · henüz okunmadı'}">${chatIcons.check}</span>`:''}</small>${m.sender_id===state.user.id?`<details class="message-menu"><summary aria-label="Mesaj seçenekleri">${chatIcons.down}</summary><div>${m.body?`<button data-action="edit-message" data-id="${m.id}" data-body="${escapeHtml(m.body)}">Düzenle</button>`:''}<button data-action="delete-message" data-id="${m.id}">Sil</button></div></details>`:''}</div>`).join(''):'<p class="muted small">İlk mesajı yaz.</p>'}</div><form class="chat-compose" data-form="message" enctype="multipart/form-data"><button type="button" class="chat-attach chat-camera" data-action="photo-menu" title="Fotoğraf çek veya galeriden seç" aria-label="Fotoğraf çek veya galeriden seç"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h4l2-2h6l2 2h4v12H3z"/><circle cx="12" cy="13" r="3"/></svg></button><div class="chat-write"><input name="body" placeholder="Özel mesaj yaz..." maxlength="2000" aria-label="Mesaj"><span id="chatPhotoStatus" class="chat-photo-status" hidden></span></div><button class="btn btn-primary">Gönder</button></form></div>`;}
 async function renderMessages(){
  if(!state.user){showAuth();return;}
  if(chatRenderedId&&$('.chat-compose [name="body"]'))chatDrafts.set(chatRenderedId,$('.chat-compose [name="body"]').value);
@@ -315,7 +317,7 @@ async function renderMessages(){
  state.selectedConversation=selected.id;
  const hadFocus=!!document.activeElement?.closest('.chat-compose');
  const draft=chatDrafts.get(selected.id)||'';
- const pageHtml=`<main class="shell page messages-page"><section class="messages-intro"><div><span class="messages-eyebrow">ÜNİ SATIŞ · ÖZEL SOHBETLER</span><h2>Mesajlarım</h2><p>Ürün hakkında konuş, fotoğraf paylaş, ayrıntıları birlikte netleştir.</p></div><div class="messages-intro-art" aria-hidden="true"><img src="/marketplace-motion.svg" alt=""></div></section><p class="chat-moderation-note">Şikâyetlerde konuşmalar yönetici tarafından incelenebilir.</p>${!conversations.length?empty('Henüz konuşman yok','Bir ilandan satıcıya özel mesaj yazarak başlayabilirsin.'):`<div class="chat-layout"><div class="chat-list">${conversations.map(c=>`<a href="${adminChat?'#'+route():'#/messages'}" class="chat-item ${c.id===selected.id?'active':''}" data-conversation="${c.id}">${avatarMarkup(c.other_name,c.other_avatar_url,'avatar chat-avatar')}<span class="chat-preview"><span class="chat-name"><strong>${escapeHtml(c.other_name)}</strong><small>${chatTime(c.last_at)}</small></span><span class="chat-last">${escapeHtml(localizedMessageText(c.last_message||'Konuşma henüz başlamadı'))}</span></span>${c.unread_count?`<span class="chat-unread">${c.unread_count}</span>`:''}</a>`).join('')}</div>${conversationPanel(selected,messages)}</div>`}</main>`;
+ const pageHtml=`<main class="shell page messages-page"><section class="messages-intro"><div><span class="messages-eyebrow">ÜNİ SATIŞ · ÖZEL SOHBETLER</span><h2>Mesajlarım</h2><p>Ürün hakkında konuş, fotoğraf paylaş, ayrıntıları birlikte netleştir.</p></div><div class="messages-intro-art" aria-hidden="true"><img src="/messages-illustration.svg" alt=""></div></section><p class="chat-moderation-note">Şikâyetlerde konuşmalar yönetici tarafından incelenebilir.</p>${!conversations.length?empty('Henüz konuşman yok','Bir ilandan satıcıya özel mesaj yazarak başlayabilirsin.'):`<div class="chat-layout"><div class="chat-list">${conversations.map(c=>`<a href="${adminChat?'#'+route():'#/messages'}" class="chat-item ${c.id===selected.id?'active':''}" data-conversation="${c.id}">${avatarMarkup(c.other_name,c.other_avatar_url,'avatar chat-avatar')}<span class="chat-preview"><span class="chat-name"><strong>${escapeHtml(c.other_name)}</strong><small>${chatTime(c.last_at)}</small></span><span class="chat-last">${escapeHtml(localizedMessageText(c.last_message||'Konuşma henüz başlamadı'))}</span></span>${c.unread_count?`<span class="chat-unread">${c.unread_count}</span>`:''}</a>`).join('')}</div>${conversationPanel(selected,messages)}</div>`}</main>`;
  const existing=$('.messages-page');
  if(existing&&$('.chat-layout')){
   const template=document.createElement('template');template.innerHTML=pageHtml;
@@ -346,11 +348,12 @@ async function renderMessages(){
   document.querySelectorAll('.messages .bubble').forEach((bubble,index)=>{
    if(messages[index]?.sender_id!==state.user.id)bubble.insertAdjacentHTML('beforeend',`<details class="message-menu"><summary aria-label="Mesaj seçenekleri">${chatIcons.down}</summary><div><button type="button" data-action="report-message" data-id="${messages[index].id}">Mesajı bildir</button></div></details>`);
    if(!messages[index]?.voice_filename)return;
-   const player=document.createElement('audio');player.controls=true;player.preload='none';player.className='chat-voice';player.src=`/api/messages/${messages[index].id}/voice`;
+   const player=document.createElement('div');player.className='voice-player';player.dataset.voiceId=messages[index].id;
    player.setAttribute('aria-label','Sesli mesaj');bubble.prepend(player);
   });
  }
  const input=$('.chat-compose [name="body"]');if(input){input.value=draft;if(hadFocus)input.focus();}
+ syncMessageMedia($('.messages'),state.user.id);
  updateChatPhotoStatus();
  updateVoiceStatus();
  applyLocale($('.messages-page'),language);
@@ -443,7 +446,7 @@ async function startVoiceRecording(){
    if(clip.size<=5*1024*1024){voiceClip=clip;voicePreviewUrl=URL.createObjectURL(clip);}else toast('Ses kaydı 5 MB sınırını aştı.');
   }
   voiceRecorder=null;updateVoiceStatus();
-  if(voiceClip&&!discardVoice){try{const body=new FormData();body.set('voice',voiceClip);await api(`/api/conversations/${state.selectedConversation}/messages`,{method:'POST',body});discardVoiceRecording();await renderMessages();}catch(error){toast(error.message);}}
+  if(voiceClip&&!discardVoice){try{const body=new FormData();body.set('voice',voiceClip);await api(`/api/conversations/${state.selectedConversation}/messages`,{method:'POST',body});document.dispatchEvent(new Event('unisatis-message-sent'));discardVoiceRecording();await renderMessages();}catch(error){toast(error.message);}}
  };
  try{recorder.start(1000);}catch(error){voiceStream.getTracks().forEach(track=>track.stop());voiceStream=null;voiceRecorder=null;throw error;}
  voiceStarted=Date.now();
@@ -768,7 +771,7 @@ document.addEventListener('click',async event=>{
    if(action==='seller-listings'){closeModal();go('/seller/'+id);return;}
    if(action==='report-conversation')return showSimpleModal('Kullanıcıyı şikâyet et','Şikâyetin yöneticinin inceleme listesine gönderilecek.',`<form data-form="report-conversation" data-id="${id}"><div class="field"><label for="conversationReportReason">Şikâyet nedeni</label><textarea id="conversationReportReason" name="reason" maxlength="500" required></textarea></div><button class="btn btn-primary">Şikâyeti gönder</button></form>`);
    if(action==='conversation-options')return showConversationOptions(Number(id));
-   if(action==='view-chat-photo')return showSimpleModal('Fotoğraf','',`<div class="photo-viewer"><a class="photo-download btn btn-outline" href="/api/messages/${id}/photo" download="unisatis-fotograf-${id}" aria-label="Fotoğrafı indir">↓ İndir</a><img src="/api/messages/${id}/photo" alt="Sohbet fotoğrafı"></div>`);
+   if(action==='view-chat-photo'){const uid=state.user.id,src=await messagePhotoURL(id,uid);if(state.user?.id!==uid)return;const decoded=new Image();decoded.src=src;await decoded.decode();showPhotoViewer(src,'Sohbet fotoğrafı');$('.app-photo-viewer').insertAdjacentHTML('beforeend',`<a class="photo-download btn btn-outline" href="${src}" download="unisatis-fotograf-${id}">↓ Fotoğrafı indir</a>`);return;}
    if(action==='clear-chat')return showSimpleModal('Sohbeti sil','Bu konuşmadaki eski mesajlar yalnızca senin ekranından kaldırılır. Karşı tarafın mesajları korunur.',`<form data-form="clear-chat" data-id="${id}"><button class="btn btn-danger">Sohbeti sil</button></form>`);
    if(action==='profile-photo')return showProfilePhotoOptions();
    if(action==='profile-camera'){state.cameraPurpose='avatar';state.modal='camera';drawModal();return;}
@@ -834,7 +837,7 @@ document.addEventListener('click',async event=>{
    if(action==='change-email') return showSimpleModal('E-postamı değiştir','Yeni e-postanı doğrulaman gerekecek.',`<form data-form="change-email"><div class="field"><label>Yeni e-posta</label><input name="email" type="email" required></div><div class="field"><label>Mevcut şifren</label><input name="password" type="password" autocomplete="current-password" required></div><button class="btn btn-primary">E-postayı değiştir</button></form>`);
    if(action==='change-phone') return showSimpleModal(state.user.phone?'Telefon numaramı değiştir':'Telefon numarası ekle','Numaran yalnızca hesap bilgilerinde görünür.',`<form data-form="change-phone"><div class="field"><label>Telefon numarası</label><input name="phone" type="tel" autocomplete="tel" placeholder="05xx xxx xx xx" required></div>${state.user.phone?'<div class="field"><label>Mevcut şifren</label><input name="password" type="password" autocomplete="current-password" required></div>':''}<button class="btn btn-primary">Numarayı kaydet</button></form>`);
    if(action==='delete-account')return showSimpleModal('Hesabı kalıcı olarak sil','İlanların, mesajların ve fotoğrafların silinecek. Bu işlem geri alınamaz.',`<form data-form="delete-account"><div class="field"><label>Onaylamak için SİL yaz</label><input name="confirmation" autocomplete="off" required></div><button class="btn btn-danger">Hesabımı kalıcı olarak sil</button></form>`);
-   if(action==='logout'){await api('/api/logout',{method:'POST'});state.user=null;connectMessageStream();state.unreadCount=0;state.filters.university='*';saleUniversityFilter='*';go('/');toast('Çıkış yapıldı.');return render();}
+   if(action==='logout'){await api('/api/logout',{method:'POST'});state.user=null;clearMessageMedia();connectMessageStream();state.unreadCount=0;state.filters.university='*';saleUniversityFilter='*';go('/');toast('Çıkış yapıldı.');return render();}
    if(!state.user){showAuth();return;}
    if(action==='favorite'){
     const wasFavorite=target.textContent.includes('♥');
@@ -924,6 +927,7 @@ document.addEventListener('submit',async event=>{
    if(voiceClip)body.set('voice',voiceClip);
    if(!String(body.get('body')||'').trim() && !chatPhoto && !voiceClip)throw new Error('Mesaj yaz, fotoğraf veya ses kaydı ekle.');
    await api(`/api/conversations/${state.selectedConversation}/messages`,{method:'POST',body});
+   document.dispatchEvent(new Event('unisatis-message-sent'));
    chatHistoryBefore.delete(state.selectedConversation);chatMessages.delete(state.selectedConversation);
    chatPhoto=null;chatDrafts.delete(state.selectedConversation);discardVoiceRecording();form.reset();return renderMessages();
   }

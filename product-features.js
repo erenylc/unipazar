@@ -3,7 +3,7 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 
 const normalize=value=>String(value||'').toLocaleLowerCase('tr-TR').replace(/ı/g,'i').normalize('NFD').replace(/[\u0300-\u036f]/g,'');
-const categories=new Set(['Ders kitapları','Elektronik','Ev & yurt','Giyim','Bisiklet & spor','Diğer']);
+const categories=new Set(['Ders kitapları','Elektronik','Ev & yurt','Giyim','Spor','Diğer']);
 const conditions=new Set(['Yeni','Az kullanılmış','Kullanılmış','Onarım gerektirir']);
 export function searchFilters(value,universities){
  const f={q:String(value.q||'').trim().slice(0,100),kind:'sale',university:String(value.university||''),category:String(value.category||''),condition:String(value.condition||''),sort:['newest','oldest','price-asc','price-desc'].includes(value.sort)?value.sort:'newest'};

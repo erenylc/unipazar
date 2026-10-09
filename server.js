@@ -318,10 +318,16 @@ app.use('/api',(req,res,next)=>{
 });
 const setSession = (res, userId, rememberMe = false) => {
   const token = randomBytes(32).toString('hex');
-  const duration = rememberMe ? 30 * 86400000 : 12 * 3600000;
+  const duration = 180 * 86400000;
   db.prepare('INSERT INTO sessions(token_hash,user_id,expires_at) VALUES(?,?,?)').run(hash(token), userId, Date.now() + duration);
-  res.cookie('up_session', token, { httpOnly: true, sameSite: 'strict', secure: !dev, ...(rememberMe ? { maxAge: duration } : {}), path: '/' });
+  res.cookie('up_session', token, { httpOnly: true, sameSite: 'strict', secure: !dev, maxAge: duration, path: '/' });
 };
+function renewPersistentSession(req,res){
+ const token=/(?:^|; )up_session=([^;]+)/.exec(req.headers.cookie||'')?.[1];if(!token)return;
+ const session=db.prepare('SELECT s.expires_at FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>? AND u.closed_at IS NULL').get(hash(token),Date.now());if(!session)return;
+ const duration=180*86400000;if(session.expires_at>Date.now()+179*86400000)return;
+ db.prepare('UPDATE sessions SET expires_at=? WHERE token_hash=?').run(Date.now()+duration,hash(token));res.cookie('up_session',token,{httpOnly:true,sameSite:'strict',secure:!dev,maxAge:duration,path:'/'});
+}
 const mailer = process.env.SMTP_HOST && process.env.SMTP_FROM ? nodemailer.createTransport({
   host: process.env.SMTP_HOST, port: Number(process.env.SMTP_PORT || 587), secure: Number(process.env.SMTP_PORT || 587) === 465,
   auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined
@@ -343,11 +349,13 @@ function validEmailCode(user,code){
 }
 app.use('/api/me/university-email',authLimit);
 const reportEmails=registerReportEmail({db,sendMail:async(email,subject,text)=>{if(testEmailCodes)return;if(brevoConfigured())return sendBrevoTextEmail(email,subject,text,fetch,{senderEmail:'unisatis06@gmail.com'});if(mailer)return mailer.sendMail({from:'unisatis06@gmail.com',to:email,subject,text});throw new Error('Email unavailable');}});
+db.prepare("UPDATE listings SET category='Spor' WHERE category='Bisiklet & spor'").run();
 registerProductFeatures({app,db,requireUser,requireAdmin,fail,hash,randomCode,universities,uploadDir,reportEmails,searchExpression:value=>listingSearch.expression(searchWords(value),closeWord),emailAvailable:emailVerificationAvailable,testEmailCodes,sendMail:async(email,subject,text)=>{if(testEmailCodes)return;if(brevoConfigured())return sendBrevoTextEmail(email,subject,text);if(mailer)return mailer.sendMail({from:process.env.SMTP_FROM,to:email,subject,text});throw new Error('Email unavailable');}});
+db.prepare("UPDATE saved_searches SET filters=json_set(filters,'$.category','Spor') WHERE json_valid(filters) AND json_extract(filters,'$.category')='Bisiklet & spor'").run();
 registerOperations({app,db,requireAdmin,fail,dataDir,uploadDir});
 pushNotifications=registerNotifications({app,db,requireUser,fail,hash});
 registerCommerce({app,db,requireUser,fail,requireVerifiedSeller:sellerPhoneVerificationRequired});
-app.get('/api/me', (req, res) => {res.set('Cache-Control','no-store');res.json({ user: publicUser(currentUser(req)),emailVerificationAvailable:emailVerificationAvailable(),phoneVerificationAvailable:smsConfigured()||testPhoneCodes,contactVerificationRequired:phoneVerificationRequired(),sellerPhoneVerificationRequired:sellerPhoneVerificationRequired(),emailVerificationRequired:!dev||phoneVerificationRequired(),googleClientId,legalVersion:legal?.version || null });});
+app.get('/api/me', (req, res) => {renewPersistentSession(req,res);res.set('Cache-Control','no-store');res.json({ user: publicUser(currentUser(req)),emailVerificationAvailable:emailVerificationAvailable(),phoneVerificationAvailable:smsConfigured()||testPhoneCodes,contactVerificationRequired:phoneVerificationRequired(),sellerPhoneVerificationRequired:sellerPhoneVerificationRequired(),emailVerificationRequired:!dev||phoneVerificationRequired(),googleClientId,legalVersion:legal?.version || null });});
 app.get('/legal/:document', (req,res)=>{
   const document=legal?.[req.params.document];
   if(!document || !['privacy','terms'].includes(req.params.document))return res.status(404).send('Metin henüz yayımlanmadı.');

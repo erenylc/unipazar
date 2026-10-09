@@ -96,7 +96,7 @@ test('öğrenci pazarı ve Dayanışma akışları', async t => {
   assert.equal((await request('/api/me','GET',null,remembered)).data.user.id,buyer.id);
   const sessionLogin=await fetch(base+'/api/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email:'buyer@gmail.com',password:'strong-password-123'})});
   assert.equal(sessionLogin.status,200);
-  assert.ok(!sessionLogin.headers.get('set-cookie').includes('Max-Age'));
+  assert.match(sessionLogin.headers.get('set-cookie'),/Max-Age=15552000/);
   await request('/api/logout','POST',null,remembered);
   assert.equal((await request('/api/me','GET',null,remembered)).data.user,null);
   assert.equal((await request('/api/listings','POST',{},seller)).status,400);
@@ -418,7 +418,7 @@ test('yerel kayıt tüm alanları ister, hesabı açar ve girişe izin verir', a
   assert.equal(registered.data.user.phone,details.phone);
   assert.equal(registered.data.user.emailVerified,false);
   assert.ok(registered.cookie);
-  assert.ok(!registered.setCookie.includes('Max-Age'));
+  assert.match(registered.setCookie,/Max-Age=15552000/);
   const auditDb=new DatabaseSync(path.join(temp,'data','unipazar.sqlite'));
   const acceptance=auditDb.prepare('SELECT * FROM registration_acceptances WHERE user_id=?').get(registered.data.user.id);
   assert.equal(acceptance.version,legalVersion);assert.ok(acceptance.accepted_at);assert.equal(JSON.parse(acceptance.documents).privacy.title,'KVKK Aydınlatma Metni');auditDb.close();

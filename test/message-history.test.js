@@ -37,6 +37,8 @@ test('large conversations show newest messages, page older ones without gaps and
    INSERT INTO conversations(id,listing_id,buyer_id,seller_id) VALUES(2,2,1,2),(3,3,2,1),(4,4,1,3);
    INSERT INTO messages(conversation_id,sender_id,body) VALUES(2,2,'Legacy second thread'),(3,2,'Legacy reverse thread'),(4,3,'Other person');`);
  const grouped=(await request('/api/conversations')).data.conversations;
+ db.prepare('UPDATE users SET avatar_filename=? WHERE id=2').run('synthetic-avatar.jpg');
+ assert.match((await request('/api/conversations')).data.conversations.find(c=>c.other_id===2).other_avatar_url,/\/api\/users\/2\/avatar\?v=synthetic-avatar.jpg/);
  const peer=grouped.filter(c=>c.other_id===2);assert.equal(peer.length,1);assert.equal(peer[0].id,1);assert.deepEqual([...peer[0].conversationIds].sort(),[1,2,3]);assert.equal(peer[0].unread_count,2);
  const merged=(await request('/api/conversations/2/messages')).data.messages;
  assert.deepEqual(merged.map(m=>m.body),['After clear','Legacy second thread','Legacy reverse thread']);
