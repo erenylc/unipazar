@@ -19,7 +19,7 @@ export class PhotoGestureState {
 export function attachPhotoGestures(frame,image,{onNavigate=()=>{}}={}) {
   const state=new PhotoGestureState();let lastTap=0;
   const draw=()=>{const p=[...state.points.values()][0],drag=state.scale<=1.02&&state.points.size===1&&!state.pinched&&state.start?clamp(p.x-state.start.px,-80,80):0;image.style.transform=`translate3d(${state.x+drag}px,${state.y}px,0) scale(${state.scale})`;frame.dataset.zoomed=state.scale>1.02?'true':'false';frame.dataset.dragging=state.points.size?'true':'false';};
-  const bounds=()=>{state.setBounds({width:frame.clientWidth,height:frame.clientHeight,imageWidth:image.clientWidth||frame.clientWidth,imageHeight:image.clientHeight||frame.clientHeight});draw();};
+  const bounds=()=>{const width=frame.clientWidth,height=frame.clientHeight;if(!width||!height||!image.naturalWidth||!image.naturalHeight)return;const fit=Math.min(width/image.naturalWidth,height/image.naturalHeight,1);const imageWidth=image.naturalWidth*fit,imageHeight=image.naturalHeight*fit;image.style.width=imageWidth+'px';image.style.height=imageHeight+'px';state.setBounds({width,height,imageWidth,imageHeight});state.rebase();draw();};
   const point=event=>{const r=frame.getBoundingClientRect();return {x:event.clientX-r.left-r.width/2,y:event.clientY-r.top-r.height/2};};
   image.draggable=false;
   frame.addEventListener('pointerdown',event=>{if(event.button!==0||event.target.closest('button'))return;event.preventDefault();const p=point(event);state.down(event.pointerId,p.x,p.y);frame.setPointerCapture(event.pointerId);});

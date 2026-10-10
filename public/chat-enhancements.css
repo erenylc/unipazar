@@ -57,3 +57,15 @@ html{scrollbar-gutter:stable}html.modal-open,html.modal-open body{overflow:hidde
 
 #chatVoiceStatus:has(.voice-player){padding:0;background:transparent}#chatVoiceStatus .voice-player{width:100%;max-width:320px}.voice-recording strong{font-variant-numeric:tabular-nums}
 .chat-typing{display:flex;flex-direction:row;width:max-content;gap:5px;padding:13px 16px}.photo-sender{display:flex;align-items:center;gap:10px}.photo-sender .avatar{width:34px;height:34px}.photo-download svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}@media(max-width:600px){.messages-page{padding-left:10px;padding-right:10px}.messages-intro{min-height:96px}.messages-intro-art{width:120px;height:92px;flex:none}.messages-intro-art img{width:100%;height:100%;object-fit:contain}.chat-layout{height:calc(100dvh - 315px);min-height:440px;grid-template-rows:94px minmax(0,1fr);gap:8px}.chat-list{display:flex;max-height:none;overflow-x:auto;overflow-y:hidden;border-radius:14px;padding:4px}.chat-row{flex:0 0 180px}.chat-row>.chat-item,.chat-list>.chat-item{height:84px;padding:9px}.chat-box{min-height:0;border-radius:14px}.chat-select-empty{min-height:100%;padding:20px}.chat-moderation-note{font-size:10px;margin:5px 0}.chat-header{min-height:58px}.messages{min-height:0}.chat-compose{position:sticky;bottom:0}.photo-viewer-modal .modal-top h2{font-size:16px}.photo-download{position:absolute;right:58px;top:-52px;width:42px;height:42px;padding:9px;display:grid;place-items:center;border-radius:50%}}
+/* Keep the fitted image geometry independent from its zoom transform. */
+.photo-gesture-frame img{max-width:none;max-height:none;object-fit:contain;transition:none;border-radius:0;flex:none}
+.detail-side{position:relative;top:auto;align-self:start}
+.detail-report{position:absolute;right:16px;top:14px;width:32px;height:32px;border:1px solid #dddbea;border-radius:9px;background:transparent;color:inherit;font-size:20px;cursor:pointer}
+.detail-side:has(.detail-report) .listing-published{margin-right:34px}
+.detail-university{display:flex;align-items:center;gap:9px;width:100%;margin-top:8px}
+.detail-university .university-logo{width:42px;height:42px;object-fit:contain;background:white;border-radius:50%;padding:3px}
+.carousel-track,.carousel-thumbs{overflow-y:hidden;scrollbar-width:none}
+.carousel-thumbs::-webkit-scrollbar{display:none}
+.campus-picker{width:auto;max-width:100%;height:auto;min-height:44px}
+.campus-picker>span{white-space:normal;overflow:visible;text-overflow:clip;max-width:none}
+.notification-chat{width:100%;text-align:left;background:transparent;color:inherit;border:0;cursor:pointer;gap:12px}
