@@ -69,3 +69,4 @@ html{scrollbar-gutter:stable}html.modal-open,html.modal-open body{overflow:hidde
 .campus-picker{width:auto;max-width:100%;height:auto;min-height:44px}
 .campus-picker>span{white-space:normal;overflow:visible;text-overflow:clip;max-width:none}
 .notification-chat{width:100%;text-align:left;background:transparent;color:inherit;border:0;cursor:pointer;gap:12px}
+.profile-menu-emoji{display:inline-block;width:26px;margin-right:6px;text-align:center;font-size:17px;line-height:1;vertical-align:middle}
