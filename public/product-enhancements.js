@@ -30,7 +30,7 @@ let fieldSequence=0;const field=(label,input)=>{const id='product-field-'+(++fie
 document.addEventListener('click',async event=>{const target=event.target.closest('[data-product-action]');if(!target)return;event.preventDefault();const action=target.dataset.productAction,id=target.dataset.id;try{
  if(action==='dismiss-onboarding'){localStorage.setItem('unisatis-onboarding-dismissed','1');$('#onboarding')?.remove();return;}
  if(action==='how-it-works')return showSimpleModal('Üni Satış nasıl çalışır?','',onboarding());
- if(action==='reset-filters'){state.filters={q:'',category:'',condition:'',sort:'newest',kind:state.filters.kind,university:location.hash==='#/donation'?(state.user?.university||''):'*'};return refreshSearchResults('');}
+ if(action==='reset-filters'){clearTimeout(priceInputTimer);state.filters={q:'',category:'',condition:'',sort:'newest',kind:state.filters.kind,university:location.hash==='#/donation'?(state.user?.university||''):'*'};await render();const menu=$('.advanced-filter-menu');if(menu)menu.open=true;return;}
  if(action==='save-search')return showSimpleModal('Aramayı kaydet','Seçtiğin filtreler hesabında saklanır.',`<form data-product-form="save-search">${field('Arama adı','<input name="name" maxlength="80" required value="'+esc(state.filters.q||'Üniversitemdeki ilanlar')+'">')}<label><input type="checkbox" name="notify"> Yeni ilanları uygulama içinden bildir</label><div class="product-actions"><button class="btn btn-primary">Kaydet</button></div></form>`);
  if(action==='saved-searches')return showSearches();
  if(action==='my-reports')return showReports();

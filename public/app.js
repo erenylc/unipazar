@@ -1,4 +1,4 @@
-import {syncMessageMedia,messagePhotoURL,clearMessageMedia} from './message-media.js';
+import {syncMessageMedia,messagePhotoURL,clearMessageMedia,mountVoicePreview,clearVoicePreview} from './message-media.js';
 import {attachPhotoGestures} from './photo-gestures.js';
 import {chatIcons,avatarMarkup} from './chat-ui.js';
 import {optimizePhoto} from './photo-upload.js';
@@ -42,7 +42,7 @@ function cacheLifetime(url){
  return 0;
 }
 let voiceAudioContext=null, voiceAnalyser=null, voiceAnimation=null, voiceStarted=0;
-let chatPhoto=null, cameraStream=null, voiceClip=null, voicePreviewUrl=null, voiceRecorder=null, voiceStream=null, voiceTimer=null, voiceSeconds=0, discardVoice=false, selectedListingPhotos=[], keptEditPhotos=[], newEditPhotos=[];
+let chatPhoto=null, cameraStream=null, voiceClip=null, voicePreviewUrl=null, voiceRecorder=null, voiceStream=null, voiceTimer=null, voiceSeconds=0, discardVoice=false, voiceFinishing=false, voiceStarting=false, voiceGeneration=0, selectedListingPhotos=[], keptEditPhotos=[], newEditPhotos=[];
 const themeIcon=()=>theme==='dark'?'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42"/></svg>':'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.2 15.9A8.7 8.7 0 0 1 8.1 3.8 8.8 8.8 0 1 0 20.2 15.9Z"/><path d="M17.4 3.2v3.4m-1.7-1.7h3.4M21 8.1v2m-1-1h2"/></svg>';
 function toast(message){ const el=$('#toast'); el.textContent=translateText(message,language); el.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>el.classList.remove('show'),4000); }
 async function api(url, options={}){
@@ -421,42 +421,46 @@ function updateVoiceStatus(){
  button.classList.toggle('recording',recording);
  status.hidden=!recording&&!voiceClip;
  status.classList.toggle('voice-recording',recording);
- status.innerHTML=recording?`<span class="voice-live-dot"></span><span class="voice-bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><strong>${String(Math.floor(voiceSeconds/60)).padStart(2,'0')}:${String(voiceSeconds%60).padStart(2,'0')}</strong><span class="muted small">Kaydetmek için mikrofona tekrar dokun</span>`:voiceClip?`<audio controls preload="metadata" src="${voicePreviewUrl}"></audio>`:'';
+ status.innerHTML=recording?`<span class="voice-live-dot"></span><span class="voice-bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><strong>${String(Math.floor(voiceSeconds/60)).padStart(2,'0')}:${String(voiceSeconds%60).padStart(2,'0')}</strong><span class="muted small">Kaydetmek için mikrofona tekrar dokun</span>`:voiceClip?`<div class="voice-player" id="voicePreviewPlayer"></div>`:'';
+ if(!recording&&voiceClip&&voicePreviewUrl)mountVoicePreview($('#voicePreviewPlayer'),voicePreviewUrl);
  applyLocale(status,language);
  button.setAttribute('aria-label',translateText(recording?'Kaydı bitir':'Sesli mesaj kaydet',language));
  button.title=translateText(recording?'Kaydı bitir':'Sesli mesaj kaydet',language);
 }
 async function startVoiceRecording(){
+ if(voiceFinishing||voiceStarting)throw new Error('Ses kaydı hazırlanıyor. Biraz bekle.');
+ const recordingConversation=state.selectedConversation,recordingUser=state.user?.id,recordingRoute=route(),recordingGeneration=++voiceGeneration;
+ if(!recordingConversation||!recordingUser)throw new Error('Önce bir sohbet seç.');
  if(!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder)throw new Error('Bu tarayıcıda ses kaydı açılamıyor.');
  const mimeType=['audio/webm;codecs=opus','audio/ogg;codecs=opus','audio/mp4'].find(type=>MediaRecorder.isTypeSupported(type));
  if(!mimeType)throw new Error('Bu tarayıcıdaki ses biçimi desteklenmiyor.');
- voiceStream=await navigator.mediaDevices.getUserMedia({audio:true});
+ voiceStarting=true;try{voiceStream=await navigator.mediaDevices.getUserMedia({audio:true});}finally{voiceStarting=false;}
+ if(recordingGeneration!==voiceGeneration||state.user?.id!==recordingUser||state.selectedConversation!==recordingConversation||route()!==recordingRoute){voiceStream.getTracks().forEach(track=>track.stop());voiceStream=null;return;}
  try{voiceRecorder=new MediaRecorder(voiceStream,{mimeType});}
  catch(error){voiceStream.getTracks().forEach(track=>track.stop());voiceStream=null;throw error;}
  const recorder=voiceRecorder, chunks=[];
- if(voicePreviewUrl)URL.revokeObjectURL(voicePreviewUrl);voicePreviewUrl=null;voiceClip=null;chatPhoto=null;updateChatPhotoStatus();discardVoice=false;voiceSeconds=0;
+ clearVoicePreview();if(voicePreviewUrl)URL.revokeObjectURL(voicePreviewUrl);voicePreviewUrl=null;voiceClip=null;chatPhoto=null;updateChatPhotoStatus();discardVoice=false;voiceSeconds=0;
  recorder.ondataavailable=event=>{if(event.data.size)chunks.push(event.data);};
  recorder.onstop=async()=>{
-  cancelAnimationFrame(voiceAnimation);await voiceAudioContext?.close();voiceAudioContext=null;
-  clearInterval(voiceTimer);voiceTimer=null;
-  voiceStream?.getTracks().forEach(track=>track.stop());voiceStream=null;
-  if(!discardVoice && chunks.length){
-   const extension=mimeType.includes('ogg')?'ogg':mimeType.includes('mp4')?'mp4':'webm';
-   const clip=new File(chunks,`sesli-mesaj-${Date.now()}.${extension}`,{type:mimeType});
-   if(clip.size<=5*1024*1024){voiceClip=clip;voicePreviewUrl=URL.createObjectURL(clip);}else toast('Ses kaydı 5 MB sınırını aştı.');
-  }
-  voiceRecorder=null;updateVoiceStatus();
-  if(voiceClip&&!discardVoice){try{const body=new FormData();body.set('voice',voiceClip);await api(`/api/conversations/${state.selectedConversation}/messages`,{method:'POST',body});document.dispatchEvent(new Event('unisatis-message-sent'));discardVoiceRecording();await renderMessages();}catch(error){toast(error.message);}}
+  voiceFinishing=true;
+  try{
+   cancelAnimationFrame(voiceAnimation);const context=voiceAudioContext;voiceAudioContext=null;await context?.close().catch(()=>{});
+   clearInterval(voiceTimer);voiceTimer=null;voiceStream?.getTracks().forEach(track=>track.stop());voiceStream=null;
+   const sameConversation=recordingGeneration===voiceGeneration&&state.user?.id===recordingUser&&state.selectedConversation===recordingConversation&&route()===recordingRoute;
+   if(!discardVoice&&sameConversation&&chunks.length){const extension=mimeType.includes('ogg')?'ogg':mimeType.includes('mp4')?'mp4':'webm';const clip=new File(chunks,`sesli-mesaj-${Date.now()}.${extension}`,{type:mimeType});if(clip.size<=5*1024*1024){voiceClip=clip;voicePreviewUrl=URL.createObjectURL(clip);}else toast('Ses kaydı 5 MB sınırını aştı.');}
+   voiceRecorder=null;updateVoiceStatus();
+   if(voiceClip&&!discardVoice&&sameConversation){const sentClip=voiceClip,body=new FormData();body.set('voice',sentClip);await api(`/api/conversations/${recordingConversation}/messages`,{method:'POST',body});if(state.user?.id===recordingUser)document.dispatchEvent(new Event('unisatis-message-sent'));if(state.selectedConversation===recordingConversation&&voiceClip===sentClip){discardVoiceRecording();await renderMessages();}}
+  }catch(error){toast(error.message);}finally{voiceFinishing=false;voiceRecorder=null;}
  };
  try{recorder.start(1000);}catch(error){voiceStream.getTracks().forEach(track=>track.stop());voiceStream=null;voiceRecorder=null;throw error;}
  voiceStarted=Date.now();
  voiceAudioContext=new AudioContext();await voiceAudioContext.resume();voiceAnalyser=voiceAudioContext.createAnalyser();voiceAnalyser.fftSize=256;voiceAudioContext.createMediaStreamSource(voiceStream).connect(voiceAnalyser);
  const samples=new Uint8Array(voiceAnalyser.frequencyBinCount);
  const drawWave=()=>{if(recorder.state!=="recording")return;voiceAnalyser.getByteFrequencyData(samples);document.querySelectorAll(".voice-bars i").forEach((bar,i)=>{bar.style.height=`${3+samples[i*4]*.09}px`;});voiceAnimation=requestAnimationFrame(drawWave);};drawWave();
- voiceTimer=setInterval(()=>{voiceSeconds=Math.floor((Date.now()-voiceStarted)/1000);updateVoiceStatus();if(voiceSeconds>=60 && recorder.state==='recording')recorder.stop();},1000);
+ voiceTimer=setInterval(()=>{voiceSeconds=Math.floor((Date.now()-voiceStarted)/1000);updateVoiceStatus();if(voiceSeconds>=60 && recorder.state==='recording'){voiceFinishing=true;recorder.stop();}},1000);
  updateVoiceStatus();
 }
-function discardVoiceRecording(){discardVoice=true;voiceClip=null;if(voicePreviewUrl)URL.revokeObjectURL(voicePreviewUrl);voicePreviewUrl=null;if(voiceRecorder?.state==='recording')voiceRecorder.stop();else updateVoiceStatus();}
+function discardVoiceRecording(){voiceGeneration++;clearVoicePreview();discardVoice=true;voiceClip=null;if(voicePreviewUrl)URL.revokeObjectURL(voicePreviewUrl);voicePreviewUrl=null;if(voiceRecorder?.state==='recording'){voiceFinishing=true;voiceRecorder.stop();}else updateVoiceStatus();}
 function stopCamera(){cameraStream?.getTracks().forEach(track=>track.stop());cameraStream=null;}
 function showAuth(tab='login'){ state.googleProfile=null;state.authTab=tab; state.modal='auth';loadUniversities().catch(()=>{}); drawModal(); }
 function showSimpleModal(title,body,form){ state.modal={title,body,form}; drawModal(); }
@@ -716,7 +720,7 @@ async function render(){const path=route(),sequence=++navigationSequence;
  if(!state.user&&accountRoutes.has(path)){renderGuestArea(path);return;}
  const loadingTimer=setTimeout(()=>{if(sequence===navigationSequence&&route()===path)showRouteLoading(path);},120);
  try { const path=route(); if(path==='/') await renderBrowse(); else if(path==='/donation') await renderBrowse(true); else if(path.startsWith('/listing/')) {await renderDetail(path.split('/')[2]);decorateDetail();} else if(path.startsWith('/seller/')) await renderSeller(path.split('/')[2]); else if(path==='/sell') renderSellChoice(); else if(path==='/sell-sale') {renderSell();restoreDraft();} else if(path==='/sell-donation') {renderSell('donation');restoreDraft();} else if(path.startsWith('/checkout/')) await (await import('./commerce.js')).renderCheckout(path.split('/')[2]); else if(path==='/orders') await (await import('./commerce.js')).renderOrders(); else if(path==='/favorites') await renderFavorites(); else if(path.startsWith('/admin-messages/'))await renderAdminMessages(path.split('/')[2],path.split('/')[3]);else if(path.startsWith('/admin-message/')){if(state.user?.role!=='admin'){go('/');return;}state.selectedConversation=Number(path.split('/')[2]);await renderMessages();}else if(path==='/messages') await renderMessages(); else if(path==='/mine') await renderListingsDashboard(); else if(path==='/manage') await renderManage(); else if(path==='/account'){await loadUniversities();renderAccount();} else if(path==='/support') await renderSupport(); else if(path==='/admin') await renderAdmin(); else go('/'); } catch(error){ if(sequence===navigationSequence){toast(error.message);pageFrame(`<main class="shell page">${empty('Sayfa yüklenemedi',error.message)}</main>`,'/');} } finally {clearTimeout(loadingTimer);} }
-async function refreshUser(){const result=await api('/api/me');state.user=result.user;if(state.user?.avatarUrl){const photo=new Image();photo.src=state.user.avatarUrl;}state.emailVerificationAvailable=result.emailVerificationAvailable;state.phoneVerificationAvailable=!!result.phoneVerificationAvailable;state.contactVerificationRequired=!!result.contactVerificationRequired;state.sellerPhoneVerificationRequired=!!result.sellerPhoneVerificationRequired;state.emailVerificationRequired=!!result.emailVerificationRequired;state.googleClientId=result.googleClientId||'';state.legalVersion=result.legalVersion||null;connectMessageStream();if(!state.user)warmGoogleSignIn().catch(()=>{});}
+async function refreshUser(){const result=await api('/api/me');if(state.user?.id&&state.user.id!==result.user?.id){clearMessageMedia();responseCache.clear();cacheGeneration++;}state.user=result.user;if(state.user?.avatarUrl){const photo=new Image();photo.src=state.user.avatarUrl;}state.emailVerificationAvailable=result.emailVerificationAvailable;state.phoneVerificationAvailable=!!result.phoneVerificationAvailable;state.contactVerificationRequired=!!result.contactVerificationRequired;state.sellerPhoneVerificationRequired=!!result.sellerPhoneVerificationRequired;state.emailVerificationRequired=!!result.emailVerificationRequired;state.googleClientId=result.googleClientId||'';state.legalVersion=result.legalVersion||null;connectMessageStream();if(!state.user)warmGoogleSignIn().catch(()=>{});}
 async function refreshUnread(){
   state.unreadCount=state.user?(await api('/api/unread-count')).count:0;
   document.querySelectorAll('.message-count').forEach(badge=>{badge.hidden=state.unreadCount===0;badge.textContent=state.unreadCount>99?'99+':String(state.unreadCount);});
@@ -784,7 +788,7 @@ document.addEventListener('click',async event=>{
    if(action==='edit-message')return showSimpleModal('Mesajı düzenle','',`<form data-form="edit-message" data-id="${id}"><textarea name="body" maxlength="2000" required>${escapeHtml(target.dataset.body)}</textarea><button class="btn btn-primary">Kaydet</button></form>`);
    if(action==='delete-message'){await api('/api/messages/'+id,{method:'DELETE'});return renderMessages();}
    if(action==='voice-start'){await startVoiceRecording();return;}
-   if(action==='voice-stop'){if(voiceRecorder?.state==='recording')voiceRecorder.stop();return;}
+   if(action==='voice-stop'){if(voiceRecorder?.state==='recording'){voiceFinishing=true;voiceRecorder.stop();}return;}
    if(action==='remove-voice'){discardVoiceRecording();return;}
    if(action==='remove-chat-photo'){chatPhoto=null;updateChatPhotoStatus();return;}
    if(action==='camera-start'){
