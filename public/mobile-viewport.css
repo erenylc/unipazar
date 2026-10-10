@@ -1,0 +1,20 @@
+:root{--visible-height:100dvh;--visible-top:0px}
+@media(max-width:700px){
+ /* Use the area above the keyboard, including browser viewport panning. */
+ .app-assistant:has(.assistant-panel:not([hidden])){z-index:90}
+ .app-assistant:has(.assistant-panel:not([hidden])) .assistant-launcher{visibility:hidden}
+ .app-assistant .assistant-panel{position:fixed;top:calc(var(--visible-top) + 12px);bottom:auto;right:12px;width:calc(100% - 24px);height:min(600px,calc(var(--visible-height) - 24px));max-height:calc(var(--visible-height) - 24px);box-sizing:border-box;animation:none}
+ .assistant-form{flex:none;padding-bottom:max(10px,env(safe-area-inset-bottom))}
+ .assistant-form input,.chat-compose input,.field input,.field textarea,.field select,.search{font-size:16px}
+ .assistant-messages{min-height:0;overflow-y:auto;overflow-x:hidden}
+ html.mobile-keyboard .assistant-suggestions,html.mobile-keyboard .assistant-privacy{display:none}
+ html.mobile-keyboard .assistant-panel header{padding:8px 14px}
+ html.mobile-keyboard .mobile-nav{display:none}
+ html.chat-keyboard .chat-layout.conversation-open .chat-box{position:fixed;z-index:80;top:calc(var(--visible-top) + 8px);left:8px;right:8px;width:auto;height:calc(var(--visible-height) - 16px);min-height:0;max-height:calc(var(--visible-height) - 16px);box-sizing:border-box}
+ html.chat-keyboard .chat-header,html.chat-keyboard .chat-compose{flex-shrink:0}
+ html.chat-keyboard .chat-compose{position:static}
+ .modal-backdrop{top:var(--visible-top);bottom:auto;height:var(--visible-height);box-sizing:border-box;padding:8px}
+ .modal,.modal:has([data-form=register]){max-height:calc(var(--visible-height) - 16px);box-sizing:border-box;overscroll-behavior:contain}
+ .profile-menu{max-height:calc(var(--visible-height) - 100px);overflow-y:auto;overscroll-behavior:contain}
+ html.mobile-keyboard #toast{bottom:auto;top:calc(var(--visible-top) + 8px)}
+}
