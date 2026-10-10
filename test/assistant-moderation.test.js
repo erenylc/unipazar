@@ -69,6 +69,15 @@ test('Gemini retries an unavailable configured model only with an available free
  assert.deepEqual(urls.map(url=>url.replace(/^.*\/models\//,'').replace(':generateContent','')),
   ['gemini-retired','https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000','gemini-3.6-flash']);
 });
+test('Gemini retries temporary provider outages before using local help',async()=>{
+ let calls=0;
+ const reply=await answerAppQuestion('Ürünümü nasıl anlatmalıyım?',{env:{APP_ASSISTANT_PROVIDER:'gemini',GEMINI_API_KEY:'synthetic-google-key'},fetchImpl:async()=>{
+  calls++;
+  if(calls<3)return new Response('',{status:503});
+  return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:'Durumunu ve kusurlarını açıkça yaz.'}]}}]});
+ }});
+ assert.equal(calls,3);assert.equal(reply.mode,'ai');assert.equal(reply.answer,'Durumunu ve kusurlarını açıkça yaz.');
+});
 test('photo requests use image moderation and cache only classifications',async()=>{
  let calls=0;
  const fetchImpl=async(url,options)=>{calls++;assert.equal(url,'https://api.openai.com/v1/moderations');const body=JSON.parse(options.body);assert.equal(body.model,'omni-moderation-latest');assert.equal(body.input[0].type,'image_url');assert.match(body.input[0].image_url.url,/^data:image\/jpeg;base64,/);return Response.json(result(false));};
