@@ -2,7 +2,7 @@
 let connection={state:'untested'};
 let resolvedModel={requested:'',selected:''};
 export const geminiConnectionStatus=()=>({...connection});
-const freeTextModels=['gemini-3.8-flash','gemini-3.6-flash'];
+const freeTextModels=['gemini-3.6-flash','gemini-3.8-flash'];
 async function availableFreeModels(apiKey,fetchImpl){
  const response=await fetchImpl('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000',{
   headers:{'x-goog-api-key':apiKey},signal:AbortSignal.timeout(10000)
@@ -20,7 +20,7 @@ async function generate(model,message,{apiKey,fetchImpl,history,instructions}){
   body:JSON.stringify({
    systemInstruction:{parts:[{text:instructions}]},
    contents:[...history,{role:'user',content:message}].map(item=>({role:item.role==='assistant'?'model':'user',parts:[{text:item.content}]})),
-   generationConfig:{maxOutputTokens:1200,thinkingConfig:{thinkingLevel:'low'}}
+   generationConfig:{maxOutputTokens:600,thinkingConfig:{thinkingLevel:'low'}}
   })
  });
 }

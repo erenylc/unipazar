@@ -689,6 +689,10 @@ function decorateDetail(){
 }
 const accountRoutes=new Set(['/favorites','/orders','/messages','/mine','/manage','/account','/sell','/sell-sale','/sell-donation','/admin']);
 function renderGuestArea(path){
+ if(path==='/sell'){
+  pageFrame(`<main class="shell page narrow-page guest-sell-choice"><div class="section-head"><div><h2>Nasıl ilan vermek istersin?</h2><p>Seçimini yap; yayınlama adımında giriş yapabilir veya hesap oluşturabilirsin.</p></div></div><div class="choice-grid"><button class="choice-card" data-action="login-required"><span class="choice-icon">↗</span><h3>İkinci el satış</h3><p>Ürününe fiyat belirle ve öğrencilerle güvenli şekilde iletişime geç.</p><strong>Satılık ilan ver →</strong></button><button class="choice-card choice-free" data-action="login-required" data-tab="register"><span class="choice-icon">♡</span><h3>Destek ol</h3><p>Kullanmadığın ürünü ihtiyacı olan bir öğrenciyle ücretsiz paylaş.</p><strong>Dayanışma ilanı ver →</strong></button></div></main>`,'/sell');
+  return;
+ }
  const sections={
   '/account':['Hesabım','İlanları hesap açmadan inceleyebilirsin. İlan vermek, favorilerini saklamak ve satıcılarla mesajlaşmak için hesabına giriş yap.'],
   '/favorites':['Beğendiğin ilanları bir arada tut','Favorilerin hesabına kaydedilir; telefondan ve bilgisayardan aynı listeye ulaşabilirsin. Ürünleri incelemek için hesap gerekmez.'],
