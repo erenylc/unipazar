@@ -19,3 +19,4 @@ html[data-theme="dark"] .guest-welcome p{color:#c8c5dc}html[data-theme="dark"] .
 }
 @media(max-width:400px){.hero{grid-template-columns:minmax(0,1fr) 112px}.hero-copy{padding:14px 0 14px 16px}.hero-art img{width:128%;height:136px;max-height:136px}.hero .eyebrow{font-size:8px}}
 @media(prefers-reduced-motion:reduce){.hero-art img{transition:none}.hero-art:hover img{transform:none}}
+.hero-art img{transition:none}.hero-art:hover img{transform:none!important}

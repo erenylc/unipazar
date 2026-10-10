@@ -908,6 +908,15 @@ app.get('/api/message-events', (req,res) => {
   res.flushHeaders();
   messageHub.add(user.id,req,res);
 });
+app.post('/api/conversations/:id/typing',(req,res)=>{
+ const user=requireUser(req,res);if(!user)return;
+ const conversation=db.prepare('SELECT id,buyer_id,seller_id FROM conversations WHERE id=?').get(req.params.id);
+ if(!conversation||![conversation.buyer_id,conversation.seller_id].includes(user.id))return fail(res,404,'Konuşma bulunamadı.');
+ const recipientId=conversation.buyer_id===user.id?conversation.seller_id:conversation.buyer_id;
+ if(usersBlocked(user.id,recipientId))return fail(res,403,'Bu kullanıcıyla mesajlaşma kapalı.');
+ messageHub.sendTo(recipientId,{type:'typing',conversationId:conversation.id,senderId:user.id,typing:req.body?.typing===true});
+ res.json({ok:true});
+});
 app.get('/api/unread-count', (req, res) => {
   const user = requireUser(req,res); if (!user) return;
   const count = db.prepare(`SELECT COUNT(*) AS count FROM messages m

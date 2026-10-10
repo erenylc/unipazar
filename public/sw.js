@@ -1,4 +1,4 @@
-const OFFLINE_CACHE='unisatis-offline-v1';
+const OFFLINE_CACHE='unisatis-offline-v2';
 const OFFLINE_URL='/offline.html';
 self.addEventListener('install',event=>{
  event.waitUntil(caches.open(OFFLINE_CACHE).then(cache=>cache.add(OFFLINE_URL)).then(()=>self.skipWaiting?.()));

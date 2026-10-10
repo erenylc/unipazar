@@ -11,3 +11,7 @@ test('connection bounds and stalled clients cannot retain unbounded buffers',()=
  let now=100;const hub=createMessageHub({maxConnections:2,maxPerUser:1,clock:()=>now});
  try{const first=client(),second=client(),third=client();assert.equal(hub.add(1,first.request,first.response),true);assert.equal(hub.add(1,second.request,second.response),false);assert.equal(hub.add(2,second.request,second.response),true);assert.equal(hub.add(3,third.request,third.response),false);first.response.allow=false;hub.notify({id:1,buyer_id:1,seller_id:2},2);now+=61000;hub.heartbeat();assert.equal(first.response.destroyed,true);assert.equal(hub.size,1);}finally{hub.close();}
 });
+test('typing events are delivered only to the intended user',()=>{
+ const hub=createMessageHub();
+ try{const buyer=client(),seller=client();hub.add(1,buyer.request,buyer.response);hub.add(2,seller.request,seller.response);hub.sendTo(2,{type:'typing',conversationId:9,senderId:1,typing:true});assert.equal(buyer.response.writes.some(value=>value.includes('typing')),false);assert.equal(seller.response.writes.at(-1),'data: {"type":"typing","conversationId":9,"senderId":1,"typing":true}\n\n');}finally{hub.close();}
+});

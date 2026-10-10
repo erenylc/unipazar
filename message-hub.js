@@ -23,10 +23,14 @@ export function createMessageHub({heartbeatMs=25000,maxConnections=20000,maxPerU
   const data=`data: ${JSON.stringify({conversationId:conversation.id,senderId})}\n\n`;
   for(const userId of new Set([conversation.buyer_id,conversation.seller_id]))for(const response of streams.get(userId)||[])write(response,data);
  }
+ function sendTo(userId,payload){
+  const data=`data: ${JSON.stringify(payload)}\n\n`;
+  for(const response of streams.get(userId)||[])write(response,data);
+ }
  function heartbeat(){const now=clock();for(const [response,client] of clients){
   if(client.blockedAt&&now-client.blockedAt>60000){remove(response);response.destroy();continue;}
   if(now>=client.nextHeartbeat){client.nextHeartbeat=now+heartbeatMs;if(!client.blockedAt)write(response,': ping\n\n');}
  }}
  const timer=setInterval(heartbeat,1000);timer.unref();
- return {streams,add,notify,heartbeat,close(){clearInterval(timer);for(const response of clients.keys())response.end();clients.clear();streams.clear();},get size(){return clients.size;}};
+ return {streams,add,notify,sendTo,heartbeat,close(){clearInterval(timer);for(const response of clients.keys())response.end();clients.clear();streams.clear();},get size(){return clients.size;}};
 }

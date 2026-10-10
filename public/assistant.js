@@ -12,6 +12,7 @@ let busy=false,configured=false;
 const history=[];
 const sendButton=form.querySelector('[type="submit"]');
 function addMessage(text,user=false){const item=document.createElement('div');item.className='assistant-message'+(user?' assistant-user':'');item.textContent=text;messages.append(item);messages.scrollTop=messages.scrollHeight;return item;}
+function addThinking(){const item=document.createElement('div');item.className='assistant-message assistant-thinking';item.setAttribute('aria-label','Yanıt hazırlanıyor');item.setAttribute('aria-busy','true');item.innerHTML='<i></i><i></i><i></i>';messages.append(item);messages.scrollTop=messages.scrollHeight;return item;}
 addMessage('Merhaba! Üni Satış’ta ilan verme, fotoğraflar, mesajlar ve hesap işlemleri hakkında yardımcı olabilirim.');
 function close(){recognition?.abort();panel.hidden=true;launcher.setAttribute('aria-expanded','false');launcher.focus();}
 launcher.addEventListener('click',async()=>{
@@ -23,7 +24,7 @@ root.addEventListener('keydown',event=>{if(event.key==='Escape'&&!panel.hidden)c
 document.addEventListener('pointerdown',event=>{if(!panel.hidden&&!root.contains(event.target)){panel.hidden=true;launcher.setAttribute('aria-expanded','false');recognition?.abort();}});
 async function ask(question){
  if(busy||!question.trim())return;busy=true;sendButton.disabled=true;input.value='';addMessage(question,true);
- const waiting=addMessage('Yanıt hazırlanıyor…');waiting.setAttribute('aria-busy','true');
+ const waiting=addThinking();
  try{
   const response=await fetch('/api/assistant',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:question,history:history.slice(-10)}),signal:AbortSignal.timeout(25000)});
  const data=await response.json();if(!response.ok)throw new Error(data.error||'Asistan yanıt veremedi.');
