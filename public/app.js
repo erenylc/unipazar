@@ -735,6 +735,7 @@ let messageStream=null, streamUserId=null, liveNeedsMessages=false;
 const liveRefreshQueue=createRefreshQueue(async()=>{
  const needsMessages=liveNeedsMessages;liveNeedsMessages=false;
  if(needsMessages&&(route()==='/messages'||route().startsWith('/admin-message/'))&&!document.hidden&&voiceRecorder?.state!=='recording')await renderMessages();
+ else if(needsMessages&&route()==='/notifications'&&!document.hidden)await (await import('./shopping-notifications.js')).renderShoppingNotifications();
  else await refreshUnread();
 },{onError:error=>toast(error.message)});
 function connectMessageStream(){
