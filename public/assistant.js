@@ -32,7 +32,7 @@ async function ask(question){
   history.push({role:'user',content:question},{role:'assistant',content:data.answer.slice(0,2400)});if(history.length>10)history.splice(0,history.length-10);
   for(const source of data.sources||[]){if(!/^#\/[a-z-]*$/.test(source.link||''))continue;const link=document.createElement('a');link.href=source.link;link.textContent=source.label||source.title;link.addEventListener('click',close);waiting.append(link);}
  }catch(error){waiting.textContent=error.name==='TimeoutError'?'Bağlantı yavaş. Biraz sonra tekrar sorabilirsin.':error.message;}
- finally{waiting.removeAttribute('aria-busy');busy=false;sendButton.disabled=false;messages.scrollTop=messages.scrollHeight;}
+ finally{waiting.removeAttribute('aria-busy');waiting.removeAttribute('aria-label');waiting.classList.remove('assistant-thinking');busy=false;sendButton.disabled=false;messages.scrollTop=messages.scrollHeight;}
 }
 form.addEventListener('submit',event=>{event.preventDefault();ask(input.value.trim());});
 root.querySelectorAll('.assistant-suggestions button').forEach(button=>button.addEventListener('click',()=>ask(button.textContent)));
